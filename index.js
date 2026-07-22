@@ -24,7 +24,10 @@ import {
   MAJOR_ASPECTS,
   MINOR_ASPECTS,
   calculateNatalAspects,
+  calculateCrossChartAspects,
 } from './lib/aspects.js';
+
+const SYNASTRY_BODIES = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
 
 class SwissEphemerisServer {
   constructor() {
@@ -154,6 +157,15 @@ class SwissEphemerisServer {
                 person2_longitude: {
                   type: 'number',
                   description: 'Person 2 birth longitude in decimal degrees, positive east',
+                },
+                include_minor: {
+                  type: 'boolean',
+                  description: 'Include minor aspects (semisextile, semisquare, sesquiquadrate, quincunx, quintile, biquintile). Default false.',
+                },
+                orb_overrides: {
+                  type: 'object',
+                  description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}.',
+                  additionalProperties: { type: 'number' },
                 },
               },
               required: ['person1_datetime', 'person1_latitude', 'person1_longitude', 'person2_datetime', 'person2_latitude', 'person2_longitude'],
@@ -513,75 +525,35 @@ class SwissEphemerisServer {
     };
   }
 
-  calculateSynastryAspects(person1Planets, person2Planets) {
-    const aspects = [];
-    const aspectOrbs = {
-      'conjunction': 8,
-      'opposition': 8,
-      'trine': 8,
-      'square': 8,
-      'sextile': 6,
-      'quincunx': 3,
-      'semisextile': 3
-    };
+  calculateSynastryAspects(person1Planets, person2Planets, options = {}) {
+    const toBodiesWithLonSpeed = (planets) => SYNASTRY_BODIES
+      .filter((name) => planets[name])
+      .map((name) => ({ name, longitude: planets[name].longitude, speed: planets[name].speed ?? null }));
 
-    const aspectAngles = {
-      'conjunction': 0,
-      'semisextile': 30,
-      'sextile': 60,
-      'square': 90,
-      'trine': 120,
-      'quincunx': 150,
-      'opposition': 180
-    };
+    const bodiesA = toBodiesWithLonSpeed(person1Planets);
+    const bodiesB = toBodiesWithLonSpeed(person2Planets);
 
-    // Main planets for synastry analysis
-    const mainPlanets = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
+    const aspects = calculateCrossChartAspects(bodiesA, bodiesB, options);
 
-    for (const planet1 of mainPlanets) {
-      if (!person1Planets[planet1]) continue;
-      
-      for (const planet2 of mainPlanets) {
-        if (!person2Planets[planet2]) continue;
-
-        const lon1 = person1Planets[planet1].longitude;
-        const lon2 = person2Planets[planet2].longitude;
-        
-        // Calculate the angular distance
-        let distance = Math.abs(lon1 - lon2);
-        if (distance > 180) {
-          distance = 360 - distance;
-        }
-
-        // Check for each aspect type
-        for (const [aspectName, aspectAngle] of Object.entries(aspectAngles)) {
-          const orb = aspectOrbs[aspectName];
-          const angleDiff = Math.abs(distance - aspectAngle);
-          
-          if (angleDiff <= orb) {
-            aspects.push({
-              person1_planet: planet1,
-              person2_planet: planet2,
-              aspect: aspectName,
-              orb: angleDiff.toFixed(2),
-              exact_angle: distance.toFixed(2),
-              person1_position: {
-                longitude: lon1,
-                sign: person1Planets[planet1].sign,
-                degree: person1Planets[planet1].degree
-              },
-              person2_position: {
-                longitude: lon2,
-                sign: person2Planets[planet2].sign,
-                degree: person2Planets[planet2].degree
-              }
-            });
-          }
-        }
-      }
-    }
-
-    return aspects.sort((a, b) => parseFloat(a.orb) - parseFloat(b.orb));
+    return aspects.map((a) => ({
+      person1_planet: a.body_a,
+      person2_planet: a.body_b,
+      aspect: a.aspect,
+      category: a.category,
+      orb: a.orb.toFixed(2),
+      exact_angle: a.separation.toFixed(2),
+      applying: a.applying,
+      person1_position: {
+        longitude: person1Planets[a.body_a].longitude,
+        sign: person1Planets[a.body_a].sign,
+        degree: person1Planets[a.body_a].degree,
+      },
+      person2_position: {
+        longitude: person2Planets[a.body_b].longitude,
+        sign: person2Planets[a.body_b].sign,
+        degree: person2Planets[a.body_b].degree,
+      },
+    }));
   }
 
   async handleToolCall(name, args) {
@@ -716,7 +688,24 @@ class SwissEphemerisServer {
         };
 
       case 'calculate_synastry':
-        const { person1_datetime, person1_latitude, person1_longitude, person2_datetime, person2_latitude, person2_longitude } = args;
+        const { person1_datetime, person1_latitude, person1_longitude, person2_datetime, person2_latitude, person2_longitude, include_minor: synastry_include_minor, orb_overrides: synastry_orb_overrides } = args;
+
+        if (synastry_include_minor !== undefined && typeof synastry_include_minor !== 'boolean') {
+          throw new McpError(ErrorCode.InvalidParams, 'include_minor must be a boolean');
+        }
+
+        if (synastry_orb_overrides !== undefined && (typeof synastry_orb_overrides !== 'object' || synastry_orb_overrides === null || Array.isArray(synastry_orb_overrides))) {
+          throw new McpError(ErrorCode.InvalidParams, 'orb_overrides must be an object');
+        }
+
+        if (synastry_orb_overrides !== undefined) {
+          const knownSynastryAspectNames = new Set([...Object.keys(MAJOR_ASPECTS), ...Object.keys(MINOR_ASPECTS)]);
+          for (const key of Object.keys(synastry_orb_overrides)) {
+            if (!knownSynastryAspectNames.has(key)) {
+              throw new McpError(ErrorCode.InvalidParams, `Unknown aspect in orb_overrides: ${key}`);
+            }
+          }
+        }
 
         if (!person1_datetime || typeof person1_datetime !== 'string') {
           throw new McpError(
@@ -767,7 +756,10 @@ class SwissEphemerisServer {
         const person2NatalChart = this.calculateEphemeris(person2_datetime, person2_latitude, person2_longitude);
 
         // Calculate aspects between the two charts
-        const aspects = this.calculateSynastryAspects(person1NatalChart.planets, person2NatalChart.planets);
+        const aspects = this.calculateSynastryAspects(person1NatalChart.planets, person2NatalChart.planets, {
+          includeMinor: synastry_include_minor,
+          orbOverrides: synastry_orb_overrides,
+        });
 
         return {
           person1_chart: person1NatalChart,
