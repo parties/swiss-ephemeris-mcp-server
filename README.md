@@ -10,6 +10,8 @@ A Model Context Protocol (MCP) server that provides astronomical calculations us
 - **Houses**: 12-house system using Placidus
 - **Chart Points**: Ascendant, Midheaven, IC, Descendant
 - **Additional Points**: South Node, Part of Fortune
+- **Speed**: Every planet now includes a `speed` field (deg/day, signed, negative = retrograde)
+- **Aspects**: Natal chart aspect calculation with applying/separating status
 
 ## Installation
 
@@ -53,7 +55,7 @@ npm start
 
 ## Usage
 
-The server provides four main tools:
+The server provides five main tools:
 
 ### `calculate_planetary_positions`
 
@@ -120,6 +122,25 @@ Calculate synastry chart between two people for relationship compatibility analy
 - `person2_chart`: Complete birth chart for person 2
 - `synastry_aspects`: Array of planetary aspects between the charts
 - `calculation_time`: Timestamp of calculation
+
+### `calculate_aspects`
+
+Calculate natal chart aspects for a given datetime and coordinates. Returns planetary positions plus all qualifying aspects with orb, applying/separating status, and category.
+
+**Parameters:**
+- `datetime` (string): ISO8601 format, e.g., "1985-04-12T23:20:50Z"
+- `latitude` (number): Latitude in decimal degrees (-90 to 90)
+- `longitude` (number): Longitude in decimal degrees (-180 to 180)
+- `include_minor` (boolean, optional): Include minor aspects (semisextile, semisquare, sesquiquadrate, quincunx, quintile, biquintile). Default `false`.
+- `include_angles` (boolean, optional): Include chart angles (Ascendant, Midheaven, IC, Descendant, Part of Fortune) in aspect calculations. Default `false`.
+- `include_south_node` (boolean, optional): Include South Node in aspect calculations. Default `false`.
+- `bodies` (array of strings, optional): Override the default aspect body list. Must be names known to the server.
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees, e.g. `{"conjunction": 10}`.
+
+**Returns:**
+- All fields from `calculate_planetary_positions` (`planets`, `houses`, `chart_points`, `additional_points`, `datetime`, `coordinates`)
+- `aspects`: Array of qualifying aspects, sorted by orb ascending. Each entry has `body_a`, `body_b`, `aspect`, `category` (`major`/`minor`), `aspect_angle`, `separation`, `orb`, `orb_allowed`, and `applying` (`true`/`false`/`null` — `null` when applying/separating cannot be determined, e.g. angle points with no speed, near-stationary bodies, or an exact hit).
+- `settings_used`: The resolved settings (`include_minor_aspects`, `include_angles`, `include_south_node`, `bodies`, `orb_overrides`) actually applied to the calculation.
 
 ## Docker
 

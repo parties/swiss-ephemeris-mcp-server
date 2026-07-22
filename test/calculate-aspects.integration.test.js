@@ -1,15 +1,20 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { SwissEphemerisServer } from '../index.js';
+
+if (!process.env.SE_EPHE_PATH) {
+  process.env.SE_EPHE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../vendor/swisseph');
+}
 
 function swetestAvailable() {
   try {
-    execSync('swetest -bdummy', { stdio: 'ignore' });
+    execSync(`SE_EPHE_PATH=${process.env.SE_EPHE_PATH} swetest -b12.04.1985 -ut23:20:50 -p0 -g, -head`, { stdio: 'pipe' });
     return true;
-  } catch (error) {
-    // swetest exits non-zero on bad args but that still proves the binary runs
-    return error.status !== undefined && error.status !== 127;
+  } catch {
+    return false;
   }
 }
 

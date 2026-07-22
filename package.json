@@ -12,7 +12,7 @@
     "start:http": "MCP_HTTP_MODE=true node index.js",
     "dev": "node --watch index.js",
     "dev:http": "MCP_HTTP_MODE=true node --watch index.js",
-    "test": "node --test test/"
+    "test": "node --test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.13.0",
