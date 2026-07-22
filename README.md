@@ -10,7 +10,7 @@ A Model Context Protocol (MCP) server that provides astronomical calculations us
 - **Houses**: 12-house system using Placidus
 - **Chart Points**: Ascendant, Midheaven, IC, Descendant
 - **Additional Points**: South Node, Part of Fortune
-- **Speed**: Every planet now includes a `speed` field (deg/day, signed, negative = retrograde)
+- **Speed**: Planetary position output (`calculate_planetary_positions`, `calculate_transits`, `calculate_solar_revolution`, `calculate_synastry`, `calculate_aspects`) now includes a `speed` field per planet (degrees/day, signed, negative = retrograde)
 - **Aspects**: Natal chart aspect calculation with applying/separating status
 
 ## Installation
@@ -55,7 +55,7 @@ npm start
 
 ## Usage
 
-The server provides five main tools:
+The server provides six main tools:
 
 ### `calculate_planetary_positions`
 
@@ -134,8 +134,22 @@ Calculate natal chart aspects for a given datetime and coordinates. Returns plan
 - `include_minor` (boolean, optional): Include minor aspects (semisextile, semisquare, sesquiquadrate, quincunx, quintile, biquintile). Default `false`.
 - `include_angles` (boolean, optional): Include chart angles (Ascendant, Midheaven, IC, Descendant, Part of Fortune) in aspect calculations. Default `false`.
 - `include_south_node` (boolean, optional): Include South Node in aspect calculations. Default `false`.
-- `bodies` (array of strings, optional): Override the default aspect body list. Must be names known to the server.
-- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees, e.g. `{"conjunction": 10}`.
+- `bodies` (array of strings, optional): Override the default aspect body list. Must be names known to the server. Default body set: `Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn, Uranus, Neptune, Pluto, North Node, Lilith, Chiron, Ceres, Pallas, Juno, Vesta`.
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees, e.g. `{"conjunction": 10}`. Default orbs (degrees):
+
+  | Aspect | Angle | Orb |
+  |---|---|---|
+  | conjunction | 0 | 8 |
+  | opposition | 180 | 8 |
+  | trine | 120 | 8 |
+  | square | 90 | 8 |
+  | sextile | 60 | 6 |
+  | quincunx | 150 | 3 |
+  | semisextile | 30 | 2 |
+  | semisquare | 45 | 2 |
+  | sesquiquadrate | 135 | 2 |
+  | quintile | 72 | 2 |
+  | biquintile | 144 | 2 |
 
 **Returns:**
 - All fields from `calculate_planetary_positions` (`planets`, `houses`, `chart_points`, `additional_points`, `datetime`, `coordinates`)
