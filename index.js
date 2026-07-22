@@ -11,6 +11,20 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { execSync } from 'node:child_process';
 import express from 'express';
+import {
+  formatDateToSwiss,
+  formatTimeToSwiss,
+  parsePlanetLine,
+  parseHouseLine,
+  parseChartPointLine,
+} from './lib/swetest-parse.js';
+import {
+  DEFAULT_ASPECT_BODIES,
+  ANGLE_BODIES,
+  MAJOR_ASPECTS,
+  MINOR_ASPECTS,
+  calculateNatalAspects,
+} from './lib/aspects.js';
 
 class SwissEphemerisServer {
   constructor() {
@@ -145,6 +159,50 @@ class SwissEphemerisServer {
               required: ['person1_datetime', 'person1_latitude', 'person1_longitude', 'person2_datetime', 'person2_latitude', 'person2_longitude'],
             },
           },
+          {
+            name: 'calculate_aspects',
+            description: 'Calculate natal chart aspects for a given datetime and coordinates. Returns planetary positions plus all qualifying aspects with orb, applying/separating status, and category.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                datetime: {
+                  type: 'string',
+                  description: 'ISO8601 datetime, e.g., 1985-04-12T23:20:50Z',
+                },
+                latitude: {
+                  type: 'number',
+                  description: 'Latitude in decimal degrees',
+                },
+                longitude: {
+                  type: 'number',
+                  description: 'Longitude in decimal degrees, positive east',
+                },
+                include_minor: {
+                  type: 'boolean',
+                  description: 'Include minor aspects (semisextile, semisquare, sesquiquadrate, quincunx, quintile, biquintile). Default false.',
+                },
+                include_angles: {
+                  type: 'boolean',
+                  description: 'Include chart angles (Ascendant, Midheaven, IC, Descendant, Part of Fortune) in aspect calculations. Default false.',
+                },
+                include_south_node: {
+                  type: 'boolean',
+                  description: 'Include South Node in aspect calculations. Default false.',
+                },
+                bodies: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Override the default body list. Must be names known to the server.',
+                },
+                orb_overrides: {
+                  type: 'object',
+                  description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}.',
+                  additionalProperties: { type: 'number' },
+                },
+              },
+              required: ['datetime', 'latitude', 'longitude'],
+            },
+          },
         ],
       };
     });
@@ -174,169 +232,6 @@ class SwissEphemerisServer {
     });
   }
 
-  formatDateToSwiss(date) {
-    // Format date as DD.MM.YYYY using UTC components
-    const day = String(date.getUTCDate()).padStart(2, '0');
-    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const year = date.getUTCFullYear();
-    return `${day}.${month}.${year}`;
-  }
-
-  formatTimeToSwiss(date) {
-    // Format time as HH:MM:SS using UTC components
-    const hours = String(date.getUTCHours()).padStart(2, '0');
-    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-    const seconds = String(date.getUTCSeconds()).padStart(2, '0');
-    return `${hours}:${minutes}:${seconds}`;
-  }
-
-  parsePlanetLine(line) {
-    // Parse planet position line from swetest output
-    // Format: "Sun            ,22 le 53'51.2332" or "Moon           , 2 cp 21' 3.2731"
-    const parts = line.trim().split(',');
-    if (parts.length < 2) return null;
-
-    const name = parts[0].trim();
-    const positionStr = parts[1].trim();
-    
-    // Parse position like "22 le 53'51.2332" or "2 cp 21' 3.2731" (note space after apostrophe)
-    const posMatch = positionStr.match(/^(\d+)\s+([a-z]{2})\s+(\d+)'\s*([\d.]+)$/i);
-    if (!posMatch) return null;
-
-    const degrees = parseInt(posMatch[1]);
-    const signAbbr = posMatch[2].toLowerCase();
-    const minutes = parseInt(posMatch[3]);
-    const seconds = parseFloat(posMatch[4]);
-
-    // Map sign abbreviations to full names and calculate longitude
-    const signMap = {
-      'ar': { name: 'Aries', offset: 0 },
-      'ta': { name: 'Taurus', offset: 30 },
-      'ge': { name: 'Gemini', offset: 60 },
-      'cn': { name: 'Cancer', offset: 90 },
-      'le': { name: 'Leo', offset: 120 },
-      'vi': { name: 'Virgo', offset: 150 },
-      'li': { name: 'Libra', offset: 180 },
-      'sc': { name: 'Scorpio', offset: 210 },
-      'sa': { name: 'Sagittarius', offset: 240 },
-      'cp': { name: 'Capricorn', offset: 270 },
-      'aq': { name: 'Aquarius', offset: 300 },
-      'pi': { name: 'Pisces', offset: 330 }
-    };
-
-    const signInfo = signMap[signAbbr];
-    if (!signInfo) return null;
-
-    // Calculate total longitude in degrees
-    const longitude = signInfo.offset + degrees + (minutes / 60) + (seconds / 3600);
-
-    return {
-      name,
-      longitude,
-      sign: signInfo.name,
-      degree: Math.round((degrees + (minutes / 60) + (seconds / 3600)) * 100) / 100
-    };
-  }
-
-  parseHouseLine(line) {
-    // Parse house cusp line from swetest output
-    // Format: "house  1       ,13 cn 39'52.5152"
-    const parts = line.trim().split(',');
-    if (parts.length < 2) return null;
-
-    const houseMatch = parts[0].trim().match(/^house\s+(\d+)/);
-    if (!houseMatch) return null;
-
-    const house = parseInt(houseMatch[1]);
-    const positionStr = parts[1].trim();
-    
-    // Parse position like "13 cn 39'52.5152" (allow optional spaces after apostrophe)
-    const posMatch = positionStr.match(/^(\d+)\s+([a-z]{2})\s+(\d+)'\s*([\d.]+)$/i);
-    if (!posMatch) return null;
-
-    const degrees = parseInt(posMatch[1]);
-    const signAbbr = posMatch[2].toLowerCase();
-    const minutes = parseInt(posMatch[3]);
-    const seconds = parseFloat(posMatch[4]);
-
-    // Map sign abbreviations to full names and calculate longitude
-    const signMap = {
-      'ar': { name: 'Aries', offset: 0 },
-      'ta': { name: 'Taurus', offset: 30 },
-      'ge': { name: 'Gemini', offset: 60 },
-      'cn': { name: 'Cancer', offset: 90 },
-      'le': { name: 'Leo', offset: 120 },
-      'vi': { name: 'Virgo', offset: 150 },
-      'li': { name: 'Libra', offset: 180 },
-      'sc': { name: 'Scorpio', offset: 210 },
-      'sa': { name: 'Sagittarius', offset: 240 },
-      'cp': { name: 'Capricorn', offset: 270 },
-      'aq': { name: 'Aquarius', offset: 300 },
-      'pi': { name: 'Pisces', offset: 330 }
-    };
-
-    const signInfo = signMap[signAbbr];
-    if (!signInfo) return null;
-
-    // Calculate total longitude in degrees
-    const longitude = signInfo.offset + degrees + (minutes / 60) + (seconds / 3600);
-
-    return {
-      house,
-      longitude,
-      sign: signInfo.name,
-      degree: Math.round((degrees + (minutes / 60) + (seconds / 3600)) * 100) / 100
-    };
-  }
-
-  parseChartPointLine(line) {
-    // Parse chart point line from swetest output
-    // Format: "Ascendant      ,13 cn 39'52.5152"
-    const parts = line.trim().split(',');
-    if (parts.length < 2) return null;
-
-    const name = parts[0].trim();
-    const positionStr = parts[1].trim();
-    
-    // Parse position like "13 cn 39'52.5152" (allow optional spaces after apostrophe)
-    const posMatch = positionStr.match(/^(\d+)\s+([a-z]{2})\s+(\d+)'\s*([\d.]+)$/i);
-    if (!posMatch) return null;
-
-    const degrees = parseInt(posMatch[1]);
-    const signAbbr = posMatch[2].toLowerCase();
-    const minutes = parseInt(posMatch[3]);
-    const seconds = parseFloat(posMatch[4]);
-
-    // Map sign abbreviations to full names and calculate longitude
-    const signMap = {
-      'ar': { name: 'Aries', offset: 0 },
-      'ta': { name: 'Taurus', offset: 30 },
-      'ge': { name: 'Gemini', offset: 60 },
-      'cn': { name: 'Cancer', offset: 90 },
-      'le': { name: 'Leo', offset: 120 },
-      'vi': { name: 'Virgo', offset: 150 },
-      'li': { name: 'Libra', offset: 180 },
-      'sc': { name: 'Scorpio', offset: 210 },
-      'sa': { name: 'Sagittarius', offset: 240 },
-      'cp': { name: 'Capricorn', offset: 270 },
-      'aq': { name: 'Aquarius', offset: 300 },
-      'pi': { name: 'Pisces', offset: 330 }
-    };
-
-    const signInfo = signMap[signAbbr];
-    if (!signInfo) return null;
-
-    // Calculate total longitude in degrees
-    const longitude = signInfo.offset + degrees + (minutes / 60) + (seconds / 3600);
-
-    return {
-      name,
-      longitude,
-      sign: signInfo.name,
-      degree: Math.round((degrees + (minutes / 60) + (seconds / 3600)) * 100) / 100
-    };
-  }
-
   calculateEphemeris(datetime, latitude, longitude) {
     try {
       const date = new Date(datetime);
@@ -344,13 +239,13 @@ class SwissEphemerisServer {
         throw new Error('Invalid datetime format. Use ISO8601 format like 1985-04-12T23:20:50Z');
       }
 
-      const swissDate = this.formatDateToSwiss(date);
-      const swissTime = this.formatTimeToSwiss(date);
+      const swissDate = formatDateToSwiss(date);
+      const swissTime = formatTimeToSwiss(date);
       const ephePath = process.env.SE_EPHE_PATH || '/app/vendor/swisseph';
 
       // Execute swetest for planets, including asteroids and additional points
       // 0123456789 = Sun through Pluto, t = true Node, A = mean Apogee (Lilith), D = Chiron, F = Ceres, G = Pallas, H = Juno, I = Vesta
-      const planetCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -p0123456789tADFGHI -fPZ -g, -head`;
+      const planetCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -p0123456789tADFGHI -fPZS -g, -head`;
       let planetOutput;
       try {
         planetOutput = execSync(planetCmd, { encoding: 'utf8' });
@@ -372,7 +267,7 @@ class SwissEphemerisServer {
       const planetLines = planetOutput.split('\n').filter(line => line.trim() && !line.includes('error:') && !line.includes('warning:'));
       
       planetLines.forEach(line => {
-        const planet = this.parsePlanetLine(line);
+        const planet = parsePlanetLine(line);
         if (planet) {
           // Map swetest planet codes to readable names
           const planetNames = {
@@ -400,7 +295,8 @@ class SwissEphemerisServer {
           planets[name] = {
             longitude: planet.longitude,
             sign: planet.sign,
-            degree: planet.degree
+            degree: planet.degree,
+            speed: planet.speed
           };
         }
       });
@@ -413,7 +309,7 @@ class SwissEphemerisServer {
       houseLines.forEach(line => {
         // Try parsing as house
         if (line.includes('house ')) {
-          const house = this.parseHouseLine(line);
+          const house = parseHouseLine(line);
           if (house && house.house >= 1 && house.house <= 12) {
             houses[house.house] = {
               longitude: house.longitude,
@@ -424,7 +320,7 @@ class SwissEphemerisServer {
         }
         // Try parsing as chart point
         else if (line.includes('Ascendant') || line.includes('MC') || line.includes('ARMC') || line.includes('Vertex')) {
-          const chartPoint = this.parseChartPointLine(line);
+          const chartPoint = parseChartPointLine(line);
           if (chartPoint) {
             const pointNames = {
               'Ascendant': 'Ascendant',
@@ -536,6 +432,85 @@ class SwissEphemerisServer {
     } catch (error) {
       throw new Error(`Swiss Ephemeris calculation failed: ${error.message}`);
     }
+  }
+
+  calculateChartAspects(ephemerisResult, options = {}) {
+    const {
+      includeMinor = false,
+      includeAngles = false,
+      includeSouthNode = false,
+      bodies,
+      orbOverrides = {},
+    } = options;
+
+    const knownBodies = new Set([...DEFAULT_ASPECT_BODIES, ...ANGLE_BODIES, 'South Node']);
+    const knownAspectNames = new Set([...Object.keys(MAJOR_ASPECTS), ...Object.keys(MINOR_ASPECTS)]);
+
+    const requestedBodies = Array.isArray(bodies) && bodies.length ? bodies : DEFAULT_ASPECT_BODIES;
+
+    for (const b of requestedBodies) {
+      if (!knownBodies.has(b)) {
+        throw new McpError(ErrorCode.InvalidParams, `Unknown body: ${b}`);
+      }
+    }
+
+    for (const key of Object.keys(orbOverrides)) {
+      if (!knownAspectNames.has(key)) {
+        throw new McpError(ErrorCode.InvalidParams, `Unknown aspect in orb_overrides: ${key}`);
+      }
+    }
+
+    const bodySet = new Set(requestedBodies);
+    if (includeAngles) {
+      ANGLE_BODIES.forEach((b) => bodySet.add(b));
+    }
+    if (includeSouthNode) {
+      bodySet.add('South Node');
+    }
+
+    const angleSet = new Set(ANGLE_BODIES);
+    const bodiesWithLonSpeed = [];
+
+    for (const name of bodySet) {
+      let longitude;
+      let speed;
+
+      if (ephemerisResult.planets[name]) {
+        longitude = ephemerisResult.planets[name].longitude;
+        speed = ephemerisResult.planets[name].speed ?? null;
+      } else if (name === 'South Node' && ephemerisResult.additional_points['South Node']) {
+        longitude = ephemerisResult.additional_points['South Node'].longitude;
+        speed = null;
+      } else if (name === 'Part of Fortune' && ephemerisResult.additional_points['Part of Fortune']) {
+        longitude = ephemerisResult.additional_points['Part of Fortune'].longitude;
+        speed = null;
+      } else if (angleSet.has(name) && ephemerisResult.chart_points[name]) {
+        longitude = ephemerisResult.chart_points[name].longitude;
+        speed = null;
+      } else {
+        continue;
+      }
+
+      bodiesWithLonSpeed.push({ name, longitude, speed });
+    }
+
+    const aspects = calculateNatalAspects(bodiesWithLonSpeed, {
+      includeMinor,
+      orbOverrides,
+      includeAngles,
+      includeSouthNode,
+    });
+
+    return {
+      aspects,
+      settings_used: {
+        include_minor_aspects: includeMinor,
+        include_angles: includeAngles,
+        include_south_node: includeSouthNode,
+        bodies: requestedBodies,
+        orb_overrides: orbOverrides,
+      },
+    };
   }
 
   calculateSynastryAspects(person1Planets, person2Planets) {
@@ -801,6 +776,74 @@ class SwissEphemerisServer {
           calculation_time: new Date().toISOString()
         };
 
+      case 'calculate_aspects':
+        const {
+          datetime: aspects_datetime,
+          latitude: aspects_latitude,
+          longitude: aspects_longitude,
+          include_minor,
+          include_angles,
+          include_south_node,
+          bodies: aspects_bodies,
+          orb_overrides,
+        } = args;
+
+        if (!aspects_datetime || typeof aspects_datetime !== 'string') {
+          throw new McpError(
+            ErrorCode.InvalidParams,
+            'datetime parameter is required and must be a string'
+          );
+        }
+
+        if (typeof aspects_latitude !== 'number' || aspects_latitude < -90 || aspects_latitude > 90) {
+          throw new McpError(
+            ErrorCode.InvalidParams,
+            'latitude must be a number between -90 and 90'
+          );
+        }
+
+        if (typeof aspects_longitude !== 'number' || aspects_longitude < -180 || aspects_longitude > 180) {
+          throw new McpError(
+            ErrorCode.InvalidParams,
+            'longitude must be a number between -180 and 180'
+          );
+        }
+
+        if (include_minor !== undefined && typeof include_minor !== 'boolean') {
+          throw new McpError(ErrorCode.InvalidParams, 'include_minor must be a boolean');
+        }
+
+        if (include_angles !== undefined && typeof include_angles !== 'boolean') {
+          throw new McpError(ErrorCode.InvalidParams, 'include_angles must be a boolean');
+        }
+
+        if (include_south_node !== undefined && typeof include_south_node !== 'boolean') {
+          throw new McpError(ErrorCode.InvalidParams, 'include_south_node must be a boolean');
+        }
+
+        if (aspects_bodies !== undefined && (!Array.isArray(aspects_bodies) || !aspects_bodies.every((b) => typeof b === 'string'))) {
+          throw new McpError(ErrorCode.InvalidParams, 'bodies must be an array of strings');
+        }
+
+        if (orb_overrides !== undefined && (typeof orb_overrides !== 'object' || orb_overrides === null || Array.isArray(orb_overrides))) {
+          throw new McpError(ErrorCode.InvalidParams, 'orb_overrides must be an object');
+        }
+
+        const aspectsEphemerisResult = this.calculateEphemeris(aspects_datetime, aspects_latitude, aspects_longitude);
+        const { aspects: chartAspects, settings_used } = this.calculateChartAspects(aspectsEphemerisResult, {
+          includeMinor: include_minor,
+          includeAngles: include_angles,
+          includeSouthNode: include_south_node,
+          bodies: aspects_bodies,
+          orbOverrides: orb_overrides,
+        });
+
+        return {
+          ...aspectsEphemerisResult,
+          aspects: chartAspects,
+          settings_used,
+        };
+
       default:
         throw new McpError(
           ErrorCode.MethodNotFound,
@@ -938,5 +981,9 @@ class SwissEphemerisServer {
   }
 }
 
-const server = new SwissEphemerisServer();
-server.run().catch(console.error); 
+export { SwissEphemerisServer };
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const server = new SwissEphemerisServer();
+  server.run().catch(console.error);
+}
