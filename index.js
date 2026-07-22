@@ -540,8 +540,8 @@ class SwissEphemerisServer {
       person2_planet: a.body_b,
       aspect: a.aspect,
       category: a.category,
-      orb: a.orb,
-      exact_angle: a.separation,
+      orb: a.orb.toFixed(2),
+      exact_angle: a.separation.toFixed(2),
       applying: a.applying,
       person1_position: {
         longitude: person1Planets[a.body_a].longitude,
@@ -696,6 +696,15 @@ class SwissEphemerisServer {
 
         if (synastry_orb_overrides !== undefined && (typeof synastry_orb_overrides !== 'object' || synastry_orb_overrides === null || Array.isArray(synastry_orb_overrides))) {
           throw new McpError(ErrorCode.InvalidParams, 'orb_overrides must be an object');
+        }
+
+        if (synastry_orb_overrides !== undefined) {
+          const knownSynastryAspectNames = new Set([...Object.keys(MAJOR_ASPECTS), ...Object.keys(MINOR_ASPECTS)]);
+          for (const key of Object.keys(synastry_orb_overrides)) {
+            if (!knownSynastryAspectNames.has(key)) {
+              throw new McpError(ErrorCode.InvalidParams, `Unknown aspect in orb_overrides: ${key}`);
+            }
+          }
         }
 
         if (!person1_datetime || typeof person1_datetime !== 'string') {
