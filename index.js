@@ -11,6 +11,13 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { execSync } from 'node:child_process';
 import express from 'express';
+import {
+  formatDateToSwiss,
+  formatTimeToSwiss,
+  parsePlanetLine,
+  parseHouseLine,
+  parseChartPointLine,
+} from './lib/swetest-parse.js';
 
 class SwissEphemerisServer {
   constructor() {
@@ -174,169 +181,6 @@ class SwissEphemerisServer {
     });
   }
 
-  formatDateToSwiss(date) {
-    // Format date as DD.MM.YYYY using UTC components
-    const day = String(date.getUTCDate()).padStart(2, '0');
-    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const year = date.getUTCFullYear();
-    return `${day}.${month}.${year}`;
-  }
-
-  formatTimeToSwiss(date) {
-    // Format time as HH:MM:SS using UTC components
-    const hours = String(date.getUTCHours()).padStart(2, '0');
-    const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-    const seconds = String(date.getUTCSeconds()).padStart(2, '0');
-    return `${hours}:${minutes}:${seconds}`;
-  }
-
-  parsePlanetLine(line) {
-    // Parse planet position line from swetest output
-    // Format: "Sun            ,22 le 53'51.2332" or "Moon           , 2 cp 21' 3.2731"
-    const parts = line.trim().split(',');
-    if (parts.length < 2) return null;
-
-    const name = parts[0].trim();
-    const positionStr = parts[1].trim();
-    
-    // Parse position like "22 le 53'51.2332" or "2 cp 21' 3.2731" (note space after apostrophe)
-    const posMatch = positionStr.match(/^(\d+)\s+([a-z]{2})\s+(\d+)'\s*([\d.]+)$/i);
-    if (!posMatch) return null;
-
-    const degrees = parseInt(posMatch[1]);
-    const signAbbr = posMatch[2].toLowerCase();
-    const minutes = parseInt(posMatch[3]);
-    const seconds = parseFloat(posMatch[4]);
-
-    // Map sign abbreviations to full names and calculate longitude
-    const signMap = {
-      'ar': { name: 'Aries', offset: 0 },
-      'ta': { name: 'Taurus', offset: 30 },
-      'ge': { name: 'Gemini', offset: 60 },
-      'cn': { name: 'Cancer', offset: 90 },
-      'le': { name: 'Leo', offset: 120 },
-      'vi': { name: 'Virgo', offset: 150 },
-      'li': { name: 'Libra', offset: 180 },
-      'sc': { name: 'Scorpio', offset: 210 },
-      'sa': { name: 'Sagittarius', offset: 240 },
-      'cp': { name: 'Capricorn', offset: 270 },
-      'aq': { name: 'Aquarius', offset: 300 },
-      'pi': { name: 'Pisces', offset: 330 }
-    };
-
-    const signInfo = signMap[signAbbr];
-    if (!signInfo) return null;
-
-    // Calculate total longitude in degrees
-    const longitude = signInfo.offset + degrees + (minutes / 60) + (seconds / 3600);
-
-    return {
-      name,
-      longitude,
-      sign: signInfo.name,
-      degree: Math.round((degrees + (minutes / 60) + (seconds / 3600)) * 100) / 100
-    };
-  }
-
-  parseHouseLine(line) {
-    // Parse house cusp line from swetest output
-    // Format: "house  1       ,13 cn 39'52.5152"
-    const parts = line.trim().split(',');
-    if (parts.length < 2) return null;
-
-    const houseMatch = parts[0].trim().match(/^house\s+(\d+)/);
-    if (!houseMatch) return null;
-
-    const house = parseInt(houseMatch[1]);
-    const positionStr = parts[1].trim();
-    
-    // Parse position like "13 cn 39'52.5152" (allow optional spaces after apostrophe)
-    const posMatch = positionStr.match(/^(\d+)\s+([a-z]{2})\s+(\d+)'\s*([\d.]+)$/i);
-    if (!posMatch) return null;
-
-    const degrees = parseInt(posMatch[1]);
-    const signAbbr = posMatch[2].toLowerCase();
-    const minutes = parseInt(posMatch[3]);
-    const seconds = parseFloat(posMatch[4]);
-
-    // Map sign abbreviations to full names and calculate longitude
-    const signMap = {
-      'ar': { name: 'Aries', offset: 0 },
-      'ta': { name: 'Taurus', offset: 30 },
-      'ge': { name: 'Gemini', offset: 60 },
-      'cn': { name: 'Cancer', offset: 90 },
-      'le': { name: 'Leo', offset: 120 },
-      'vi': { name: 'Virgo', offset: 150 },
-      'li': { name: 'Libra', offset: 180 },
-      'sc': { name: 'Scorpio', offset: 210 },
-      'sa': { name: 'Sagittarius', offset: 240 },
-      'cp': { name: 'Capricorn', offset: 270 },
-      'aq': { name: 'Aquarius', offset: 300 },
-      'pi': { name: 'Pisces', offset: 330 }
-    };
-
-    const signInfo = signMap[signAbbr];
-    if (!signInfo) return null;
-
-    // Calculate total longitude in degrees
-    const longitude = signInfo.offset + degrees + (minutes / 60) + (seconds / 3600);
-
-    return {
-      house,
-      longitude,
-      sign: signInfo.name,
-      degree: Math.round((degrees + (minutes / 60) + (seconds / 3600)) * 100) / 100
-    };
-  }
-
-  parseChartPointLine(line) {
-    // Parse chart point line from swetest output
-    // Format: "Ascendant      ,13 cn 39'52.5152"
-    const parts = line.trim().split(',');
-    if (parts.length < 2) return null;
-
-    const name = parts[0].trim();
-    const positionStr = parts[1].trim();
-    
-    // Parse position like "13 cn 39'52.5152" (allow optional spaces after apostrophe)
-    const posMatch = positionStr.match(/^(\d+)\s+([a-z]{2})\s+(\d+)'\s*([\d.]+)$/i);
-    if (!posMatch) return null;
-
-    const degrees = parseInt(posMatch[1]);
-    const signAbbr = posMatch[2].toLowerCase();
-    const minutes = parseInt(posMatch[3]);
-    const seconds = parseFloat(posMatch[4]);
-
-    // Map sign abbreviations to full names and calculate longitude
-    const signMap = {
-      'ar': { name: 'Aries', offset: 0 },
-      'ta': { name: 'Taurus', offset: 30 },
-      'ge': { name: 'Gemini', offset: 60 },
-      'cn': { name: 'Cancer', offset: 90 },
-      'le': { name: 'Leo', offset: 120 },
-      'vi': { name: 'Virgo', offset: 150 },
-      'li': { name: 'Libra', offset: 180 },
-      'sc': { name: 'Scorpio', offset: 210 },
-      'sa': { name: 'Sagittarius', offset: 240 },
-      'cp': { name: 'Capricorn', offset: 270 },
-      'aq': { name: 'Aquarius', offset: 300 },
-      'pi': { name: 'Pisces', offset: 330 }
-    };
-
-    const signInfo = signMap[signAbbr];
-    if (!signInfo) return null;
-
-    // Calculate total longitude in degrees
-    const longitude = signInfo.offset + degrees + (minutes / 60) + (seconds / 3600);
-
-    return {
-      name,
-      longitude,
-      sign: signInfo.name,
-      degree: Math.round((degrees + (minutes / 60) + (seconds / 3600)) * 100) / 100
-    };
-  }
-
   calculateEphemeris(datetime, latitude, longitude) {
     try {
       const date = new Date(datetime);
@@ -344,13 +188,13 @@ class SwissEphemerisServer {
         throw new Error('Invalid datetime format. Use ISO8601 format like 1985-04-12T23:20:50Z');
       }
 
-      const swissDate = this.formatDateToSwiss(date);
-      const swissTime = this.formatTimeToSwiss(date);
+      const swissDate = formatDateToSwiss(date);
+      const swissTime = formatTimeToSwiss(date);
       const ephePath = process.env.SE_EPHE_PATH || '/app/vendor/swisseph';
 
       // Execute swetest for planets, including asteroids and additional points
       // 0123456789 = Sun through Pluto, t = true Node, A = mean Apogee (Lilith), D = Chiron, F = Ceres, G = Pallas, H = Juno, I = Vesta
-      const planetCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -p0123456789tADFGHI -fPZ -g, -head`;
+      const planetCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -p0123456789tADFGHI -fPZS -g, -head`;
       let planetOutput;
       try {
         planetOutput = execSync(planetCmd, { encoding: 'utf8' });
@@ -372,7 +216,7 @@ class SwissEphemerisServer {
       const planetLines = planetOutput.split('\n').filter(line => line.trim() && !line.includes('error:') && !line.includes('warning:'));
       
       planetLines.forEach(line => {
-        const planet = this.parsePlanetLine(line);
+        const planet = parsePlanetLine(line);
         if (planet) {
           // Map swetest planet codes to readable names
           const planetNames = {
@@ -400,7 +244,8 @@ class SwissEphemerisServer {
           planets[name] = {
             longitude: planet.longitude,
             sign: planet.sign,
-            degree: planet.degree
+            degree: planet.degree,
+            speed: planet.speed
           };
         }
       });
@@ -413,7 +258,7 @@ class SwissEphemerisServer {
       houseLines.forEach(line => {
         // Try parsing as house
         if (line.includes('house ')) {
-          const house = this.parseHouseLine(line);
+          const house = parseHouseLine(line);
           if (house && house.house >= 1 && house.house <= 12) {
             houses[house.house] = {
               longitude: house.longitude,
@@ -424,7 +269,7 @@ class SwissEphemerisServer {
         }
         // Try parsing as chart point
         else if (line.includes('Ascendant') || line.includes('MC') || line.includes('ARMC') || line.includes('Vertex')) {
-          const chartPoint = this.parseChartPointLine(line);
+          const chartPoint = parseChartPointLine(line);
           if (chartPoint) {
             const pointNames = {
               'Ascendant': 'Ascendant',
