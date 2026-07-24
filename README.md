@@ -28,6 +28,8 @@ git clone https://github.com/aloistr/swisseph.git /tmp/swisseph && \
     rm -rf /tmp/swisseph
 ```
 
+`SE_EPHE_PATH` (the directory holding the `.se1` ephemeris data files) defaults to the `vendor/swisseph/` directory shipped alongside this package, so it works out of the box for both Docker and local/npx installs. Set the `SE_EPHE_PATH` environment variable to override it.
+
 
 ### Claude Desktop
 
@@ -73,6 +75,7 @@ Calculate astronomical data for a specific date, time, and location.
 - `chart_points`: Ascendant, Midheaven, IC, Descendant
 - `additional_points`: South Node, Part of Fortune
 - `house_system`: The house system code actually used
+- `warnings` (only present if something's missing): if an ephemeris data file needed for a body isn't found under `SE_EPHE_PATH`, that body is omitted from `planets` entirely rather than reported at a fabricated 0° Aries position, and a message naming the missing file is added here.
 
 ### `calculate_transits`
 

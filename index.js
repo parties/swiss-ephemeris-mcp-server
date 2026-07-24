@@ -10,6 +10,8 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import express from 'express';
 import {
   formatDateToSwiss,
@@ -29,6 +31,11 @@ import {
 } from './lib/aspects.js';
 
 const SYNASTRY_BODIES = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
+
+// Falls back to the vendor/ dir shipped alongside this file (works both in the
+// Docker image, where it's copied to /app/vendor/swisseph, and in local/npx
+// installs, where /app doesn't exist). SE_EPHE_PATH still overrides it.
+const DEFAULT_EPHE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'swisseph');
 
 // swetest house system codes: https://www.astro.com/swisseph/swephprg.htm#_Toc112948996
 const HOUSE_SYSTEMS = {
@@ -329,7 +336,7 @@ class SwissEphemerisServer {
 
       const swissDate = formatDateToSwiss(date);
       const swissTime = formatTimeToSwiss(date);
-      const ephePath = process.env.SE_EPHE_PATH || '/app/vendor/swisseph';
+      const ephePath = process.env.SE_EPHE_PATH || DEFAULT_EPHE_PATH;
 
       // Execute swetest for planets, including asteroids and additional points
       // 0123456789 = Sun through Pluto, t = true Node, A = mean Apogee (Lilith), D = Chiron, F = Ceres, G = Pallas, H = Juno, I = Vesta
@@ -350,12 +357,23 @@ class SwissEphemerisServer {
         throw new Error(`Failed to execute swetest for houses: ${error.message}`);
       }
 
+      // swetest prints these to stdout (not stderr) when an ephemeris data file for a
+      // body is missing, then still emits a "0 ar 0' 0.0000" placeholder row for that
+      // body instead of failing the whole command. Without this check that placeholder
+      // is indistinguishable from a real 0deg-Aries position and gets reported as fact.
+      const missingEphemerisFiles = [...planetOutput.matchAll(/error: SwissEph file '([^']+)' not found/g)]
+        .map((m) => m[1]);
+
       // Parse planets
       const planets = {};
       const planetLines = planetOutput.split('\n').filter(line => line.trim() && !line.includes('error:') && !line.includes('warning:'));
-      
+
       planetLines.forEach(line => {
         const planet = parsePlanetLine(line);
+        if (planet && missingEphemerisFiles.length > 0 && planet.longitude === 0 && planet.speed === 0) {
+          // Placeholder row from a missing ephemeris file, not a real position - drop it.
+          return;
+        }
         if (planet) {
           // Map swetest planet codes to readable names
           const planetNames = {
@@ -505,7 +523,7 @@ class SwissEphemerisServer {
         };
       }
 
-      return {
+      const result = {
         planets,
         houses,
         chart_points: chartPoints,
@@ -517,6 +535,14 @@ class SwissEphemerisServer {
         },
         house_system: houseSystem
       };
+
+      if (missingEphemerisFiles.length > 0) {
+        result.warnings = missingEphemerisFiles.map(
+          (file) => `Ephemeris data file '${file}' not found under SE_EPHE_PATH (${ephePath}) - bodies depending on it were omitted from 'planets' rather than reported at a false position.`
+        );
+      }
+
+      return result;
 
     } catch (error) {
       throw new Error(`Swiss Ephemeris calculation failed: ${error.message}`);
