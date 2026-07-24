@@ -104,7 +104,7 @@ class SwissEphemerisServer {
           },
           {
             name: 'calculate_transits',
-            description: 'Calculate birth chart positions and current transits for comparison. Returns both natal chart and current planetary positions.',
+            description: 'Calculate birth chart positions and current transits for comparison, including aspects from transiting bodies to the natal chart.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -123,6 +123,28 @@ class SwissEphemerisServer {
                 house_system: {
                   type: 'string',
                   description: 'House system code: P=Placidus (default), K=Koch, O=Porphyry, R=Regiomontanus, C=Campanus, E=Equal, W=Whole Sign, B=Alcabitus, M=Morinus, T=Topocentric.',
+                },
+                include_minor: {
+                  type: 'boolean',
+                  description: 'Include minor aspects (semisextile, semisquare, sesquiquadrate, quincunx, quintile, biquintile) in transit_aspects. Default false.',
+                },
+                include_angles: {
+                  type: 'boolean',
+                  description: 'Include chart angles (Ascendant, Midheaven, IC, Descendant, Part of Fortune) in transit_aspects. Default false.',
+                },
+                include_south_node: {
+                  type: 'boolean',
+                  description: 'Include South Node in transit_aspects. Default false.',
+                },
+                bodies: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Override the default body list for transit_aspects. Must be names known to the server.',
+                },
+                orb_overrides: {
+                  type: 'object',
+                  description: 'Per-aspect orb overrides in degrees for transit_aspects, e.g. {"conjunction": 10}.',
+                  additionalProperties: { type: 'number' },
                 },
               },
               required: ['birth_datetime', 'latitude', 'longitude'],
@@ -501,9 +523,11 @@ class SwissEphemerisServer {
     }
   }
 
-  calculateChartAspects(ephemerisResult, options = {}) {
+  // Shared by calculate_aspects and calculate_transits: validate the requested
+  // bodies/orb_overrides against an ephemeris result and resolve them to
+  // {name, longitude, speed} entries for the aspect engine.
+  resolveAspectBodies(ephemerisResult, options = {}) {
     const {
-      includeMinor = false,
       includeAngles = false,
       includeSouthNode = false,
       bodies,
@@ -561,12 +585,64 @@ class SwissEphemerisServer {
       bodiesWithLonSpeed.push({ name, longitude, speed });
     }
 
+    return { bodiesWithLonSpeed, requestedBodies };
+  }
+
+  calculateChartAspects(ephemerisResult, options = {}) {
+    const {
+      includeMinor = false,
+      includeAngles = false,
+      includeSouthNode = false,
+      orbOverrides = {},
+    } = options;
+
+    const { bodiesWithLonSpeed, requestedBodies } = this.resolveAspectBodies(ephemerisResult, options);
+
     const aspects = calculateNatalAspects(bodiesWithLonSpeed, {
       includeMinor,
       orbOverrides,
       includeAngles,
       includeSouthNode,
     });
+
+    return {
+      aspects,
+      settings_used: {
+        include_minor_aspects: includeMinor,
+        include_angles: includeAngles,
+        include_south_node: includeSouthNode,
+        bodies: requestedBodies,
+        orb_overrides: orbOverrides,
+      },
+    };
+  }
+
+  // Transit-to-natal aspects: current transiting bodies against the natal chart,
+  // sharing the same body resolution/validation as calculate_aspects but pairing
+  // across two charts via calculateCrossChartAspects (same engine as synastry).
+  calculateTransitAspects(natalChart, transitChart, options = {}) {
+    const {
+      includeMinor = false,
+      includeAngles = false,
+      includeSouthNode = false,
+      orbOverrides = {},
+    } = options;
+
+    const { bodiesWithLonSpeed: natalBodies, requestedBodies } = this.resolveAspectBodies(natalChart, options);
+    const { bodiesWithLonSpeed: transitBodies } = this.resolveAspectBodies(transitChart, options);
+
+    const aspects = calculateCrossChartAspects(transitBodies, natalBodies, {
+      includeMinor,
+      orbOverrides,
+    }).map((a) => ({
+      transiting_body: a.body_a,
+      natal_body: a.body_b,
+      aspect: a.aspect,
+      category: a.category,
+      orb: a.orb.toFixed(2),
+      exact_angle: a.separation.toFixed(2),
+      applying: a.applying,
+    }));
 
     return {
       aspects,
@@ -675,7 +751,17 @@ class SwissEphemerisServer {
         return this.calculateEphemeris(datetime, latitude, longitude, validateHouseSystem(house_system));
 
       case 'calculate_transits':
-        const { birth_datetime, latitude: birth_latitude, longitude: birth_longitude, house_system: transit_house_system } = args;
+        const {
+          birth_datetime,
+          latitude: birth_latitude,
+          longitude: birth_longitude,
+          house_system: transit_house_system,
+          include_minor: transit_include_minor,
+          include_angles: transit_include_angles,
+          include_south_node: transit_include_south_node,
+          bodies: transit_bodies,
+          orb_overrides: transit_orb_overrides,
+        } = args;
 
         if (!birth_datetime || typeof birth_datetime !== 'string') {
           throw new McpError(
@@ -683,19 +769,39 @@ class SwissEphemerisServer {
             'birth_datetime parameter is required and must be a string'
           );
         }
-        
+
         if (typeof birth_latitude !== 'number' || birth_latitude < -90 || birth_latitude > 90) {
           throw new McpError(
             ErrorCode.InvalidParams,
             'birth_latitude must be a number between -90 and 90'
           );
         }
-        
+
         if (typeof birth_longitude !== 'number' || birth_longitude < -180 || birth_longitude > 180) {
           throw new McpError(
             ErrorCode.InvalidParams,
             'birth_longitude must be a number between -180 and 180'
           );
+        }
+
+        if (transit_include_minor !== undefined && typeof transit_include_minor !== 'boolean') {
+          throw new McpError(ErrorCode.InvalidParams, 'include_minor must be a boolean');
+        }
+
+        if (transit_include_angles !== undefined && typeof transit_include_angles !== 'boolean') {
+          throw new McpError(ErrorCode.InvalidParams, 'include_angles must be a boolean');
+        }
+
+        if (transit_include_south_node !== undefined && typeof transit_include_south_node !== 'boolean') {
+          throw new McpError(ErrorCode.InvalidParams, 'include_south_node must be a boolean');
+        }
+
+        if (transit_bodies !== undefined && (!Array.isArray(transit_bodies) || !transit_bodies.every((b) => typeof b === 'string'))) {
+          throw new McpError(ErrorCode.InvalidParams, 'bodies must be an array of strings');
+        }
+
+        if (transit_orb_overrides !== undefined && (typeof transit_orb_overrides !== 'object' || transit_orb_overrides === null || Array.isArray(transit_orb_overrides))) {
+          throw new McpError(ErrorCode.InvalidParams, 'orb_overrides must be an object');
         }
 
         const validatedTransitHouseSystem = validateHouseSystem(transit_house_system);
@@ -707,10 +813,20 @@ class SwissEphemerisServer {
          const currentDate = new Date();
          const currentISOString = currentDate.toISOString();
          const currentEphemeris = this.calculateEphemeris(currentISOString, birth_latitude, birth_longitude, validatedTransitHouseSystem);
- 
+
+         const { aspects: transitAspects, settings_used: transitSettingsUsed } = this.calculateTransitAspects(natalChart, currentEphemeris, {
+           includeMinor: transit_include_minor,
+           includeAngles: transit_include_angles,
+           includeSouthNode: transit_include_south_node,
+           bodies: transit_bodies,
+           orbOverrides: transit_orb_overrides,
+         });
+
          return {
            natal_chart: natalChart,
            current_transits: currentEphemeris,
+           transit_aspects: transitAspects,
+           settings_used: transitSettingsUsed,
            calculation_time: currentISOString
          };
 

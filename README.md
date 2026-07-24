@@ -76,17 +76,24 @@ Calculate astronomical data for a specific date, time, and location.
 
 ### `calculate_transits`
 
-Calculate birth chart positions and current transits for comparison.
+Calculate birth chart positions and current transits for comparison, including aspects from transiting bodies to the natal chart.
 
 **Parameters:**
 - `birth_datetime` (string): Birth datetime in ISO8601 format
 - `latitude` (number): Birth latitude in decimal degrees
 - `longitude` (number): Birth longitude in decimal degrees
 - `house_system` (string, optional): House system code applied to both charts. Default `P`. See [House Systems](#house-systems).
+- `include_minor` (boolean, optional): Include minor aspects in `transit_aspects`. Default `false`.
+- `include_angles` (boolean, optional): Include chart angles in `transit_aspects`. Default `false`.
+- `include_south_node` (boolean, optional): Include South Node in `transit_aspects`. Default `false`.
+- `bodies` (array of strings, optional): Override the default body list for `transit_aspects`.
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees for `transit_aspects`.
 
 **Returns:**
 - `natal_chart`: Complete birth chart data
 - `current_transits`: Current planetary positions
+- `transit_aspects`: Array of aspects from transiting bodies to the natal chart, sorted by orb ascending. Each entry has `transiting_body`, `natal_body`, `aspect`, `category`, `orb`, `exact_angle`, `applying`.
+- `settings_used`: The resolved settings actually applied to `transit_aspects`.
 - `calculation_time`: Timestamp of transit calculation
 
 ### `calculate_solar_revolution`
