@@ -25,6 +25,7 @@ import {
   MINOR_ASPECTS,
   calculateNatalAspects,
   calculateCrossChartAspects,
+  calculateHouseOverlay,
 } from './lib/aspects.js';
 
 const SYNASTRY_BODIES = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
@@ -198,6 +199,10 @@ class SwissEphemerisServer {
                 include_minor: {
                   type: 'boolean',
                   description: 'Include minor aspects (semisextile, semisquare, sesquiquadrate, quincunx, quintile, biquintile). Default false.',
+                },
+                include_angles: {
+                  type: 'boolean',
+                  description: 'Include cross-chart aspects to chart angles (Ascendant, Midheaven, IC, Descendant) in addition to planet-planet aspects. Default false.',
                 },
                 orb_overrides: {
                   type: 'object',
@@ -606,6 +611,41 @@ class SwissEphemerisServer {
     }));
   }
 
+  // Cross-chart aspects involving chart angles (Ascendant/Midheaven/IC/Descendant):
+  // person1 planets -> person2 angles, person2 planets -> person1 angles, and angle-to-angle.
+  calculateSynastryAngleAspects(person1Chart, person2Chart, options = {}) {
+    const toPlanetBodies = (chart) => SYNASTRY_BODIES
+      .filter((name) => chart.planets[name])
+      .map((name) => ({ name, longitude: chart.planets[name].longitude, speed: chart.planets[name].speed ?? null }));
+
+    const toAngleBodies = (chart) => ANGLE_BODIES
+      .filter((name) => chart.chart_points[name])
+      .map((name) => ({ name, longitude: chart.chart_points[name].longitude, speed: null }));
+
+    const person1Planets = toPlanetBodies(person1Chart);
+    const person2Planets = toPlanetBodies(person2Chart);
+    const person1Angles = toAngleBodies(person1Chart);
+    const person2Angles = toAngleBodies(person2Chart);
+
+    const crossed = [
+      ...calculateCrossChartAspects(person1Planets, person2Angles, options),
+      ...calculateCrossChartAspects(person1Angles, person2Planets, options),
+      ...calculateCrossChartAspects(person1Angles, person2Angles, options),
+    ];
+
+    crossed.sort((a, b) => a.orb - b.orb);
+
+    return crossed.map((a) => ({
+      person1_point: a.body_a,
+      person2_point: a.body_b,
+      aspect: a.aspect,
+      category: a.category,
+      orb: a.orb.toFixed(2),
+      exact_angle: a.separation.toFixed(2),
+      applying: a.applying,
+    }));
+  }
+
   async handleToolCall(name, args) {
     switch (name) {
       case 'calculate_planetary_positions':
@@ -743,10 +783,14 @@ class SwissEphemerisServer {
         };
 
       case 'calculate_synastry':
-        const { person1_datetime, person1_latitude, person1_longitude, person2_datetime, person2_latitude, person2_longitude, include_minor: synastry_include_minor, orb_overrides: synastry_orb_overrides, person1_house_system, person2_house_system } = args;
+        const { person1_datetime, person1_latitude, person1_longitude, person2_datetime, person2_latitude, person2_longitude, include_minor: synastry_include_minor, include_angles: synastry_include_angles, orb_overrides: synastry_orb_overrides, person1_house_system, person2_house_system } = args;
 
         if (synastry_include_minor !== undefined && typeof synastry_include_minor !== 'boolean') {
           throw new McpError(ErrorCode.InvalidParams, 'include_minor must be a boolean');
+        }
+
+        if (synastry_include_angles !== undefined && typeof synastry_include_angles !== 'boolean') {
+          throw new McpError(ErrorCode.InvalidParams, 'include_angles must be a boolean');
         }
 
         if (synastry_orb_overrides !== undefined && (typeof synastry_orb_overrides !== 'object' || synastry_orb_overrides === null || Array.isArray(synastry_orb_overrides))) {
@@ -816,10 +860,34 @@ class SwissEphemerisServer {
           orbOverrides: synastry_orb_overrides,
         });
 
+        // House overlay: which of the other person's houses each planet falls into
+        const person1PlanetBodies = SYNASTRY_BODIES
+          .filter((n) => person1NatalChart.planets[n])
+          .map((n) => ({ name: n, longitude: person1NatalChart.planets[n].longitude }));
+        const person2PlanetBodies = SYNASTRY_BODIES
+          .filter((n) => person2NatalChart.planets[n])
+          .map((n) => ({ name: n, longitude: person2NatalChart.planets[n].longitude }));
+
+        const houseOverlay = {
+          person1_planets_in_person2_houses: calculateHouseOverlay(person1PlanetBodies, person2NatalChart.houses),
+          person2_planets_in_person1_houses: calculateHouseOverlay(person2PlanetBodies, person1NatalChart.houses),
+        };
+
+        // Optional angle aspects: planet-to-angle and angle-to-angle contacts across the two charts
+        let angleAspects;
+        if (synastry_include_angles) {
+          angleAspects = this.calculateSynastryAngleAspects(person1NatalChart, person2NatalChart, {
+            includeMinor: synastry_include_minor,
+            orbOverrides: synastry_orb_overrides,
+          });
+        }
+
         return {
           person1_chart: person1NatalChart,
           person2_chart: person2NatalChart,
           synastry_aspects: aspects,
+          house_overlay: houseOverlay,
+          ...(synastry_include_angles ? { angle_aspects: angleAspects } : {}),
           calculation_time: new Date().toISOString()
         };
 

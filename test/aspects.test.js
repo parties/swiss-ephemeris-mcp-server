@@ -5,6 +5,7 @@ import {
   normalizeSeparation,
   computeApplying,
   calculateNatalAspects,
+  calculateHouseOverlay,
 } from '../lib/aspects.js';
 
 test('normalizeSeparation wraps around 0/360 seam (350 vs 10 -> sep 20, not 340)', () => {
@@ -122,4 +123,30 @@ test('aspects are sorted by orb ascending', () => {
 
 test('EPSILON_DEG is a small positive number', () => {
   assert.ok(EPSILON_DEG > 0 && EPSILON_DEG < 1e-3);
+});
+
+function equalHouses(ascendantLongitude) {
+  const houses = {};
+  for (let h = 1; h <= 12; h++) {
+    houses[h] = { longitude: (ascendantLongitude + (h - 1) * 30) % 360 };
+  }
+  return houses;
+}
+
+test('calculateHouseOverlay places a body just past a cusp into that house', () => {
+  const houses = equalHouses(0); // house 1 starts at 0, house 2 at 30, ...
+  const overlay = calculateHouseOverlay([{ name: 'Sun', longitude: 31 }], houses);
+  assert.equal(overlay.Sun, 2);
+});
+
+test('calculateHouseOverlay places a body just before a cusp into the earlier house', () => {
+  const houses = equalHouses(0);
+  const overlay = calculateHouseOverlay([{ name: 'Sun', longitude: 29.999 }], houses);
+  assert.equal(overlay.Sun, 1);
+});
+
+test('calculateHouseOverlay handles the 360/0 wraparound (house 12 into house 1)', () => {
+  const houses = equalHouses(350); // house 1 starts at 350, house 12 starts at 320
+  const overlay = calculateHouseOverlay([{ name: 'Moon', longitude: 5 }], houses);
+  assert.equal(overlay.Moon, 1); // 5 deg is past the 350 cusp, wrapped
 });

@@ -122,11 +122,16 @@ Calculate synastry chart between two people for relationship compatibility analy
 - `person2_longitude` (number): Person 2 birth longitude in decimal degrees
 - `person1_house_system` (string, optional): House system code for person 1. Default `P`. See [House Systems](#house-systems).
 - `person2_house_system` (string, optional): House system code for person 2. Default `P`.
+- `include_minor` (boolean, optional): Include minor aspects. Default `false`.
+- `include_angles` (boolean, optional): Also compute `angle_aspects` (planet-to-angle and angle-to-angle contacts). Default `false`.
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees.
 
 **Returns:**
 - `person1_chart`: Complete birth chart for person 1
 - `person2_chart`: Complete birth chart for person 2
 - `synastry_aspects`: Array of planetary aspects between the charts
+- `house_overlay`: `{ person1_planets_in_person2_houses, person2_planets_in_person1_houses }` — for each of the 10 major bodies, which house (1-12) of the other person's chart it falls into
+- `angle_aspects` (only present when `include_angles` is `true`): Array of aspects involving Ascendant/Midheaven/IC/Descendant across the two charts, same shape as `synastry_aspects` but with `person1_point`/`person2_point` instead of `_planet`
 - `calculation_time`: Timestamp of calculation
 
 ### `calculate_aspects`
