@@ -29,6 +29,31 @@ import {
 
 const SYNASTRY_BODIES = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
 
+// swetest house system codes: https://www.astro.com/swisseph/swephprg.htm#_Toc112948996
+const HOUSE_SYSTEMS = {
+  P: 'Placidus',
+  K: 'Koch',
+  O: 'Porphyry',
+  R: 'Regiomontanus',
+  C: 'Campanus',
+  E: 'Equal',
+  W: 'Whole Sign',
+  B: 'Alcabitus',
+  M: 'Morinus',
+  T: 'Polich/Page (Topocentric)',
+};
+
+function validateHouseSystem(value, paramName = 'house_system') {
+  if (value === undefined) return 'P';
+  if (typeof value !== 'string' || !HOUSE_SYSTEMS[value]) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `${paramName} must be one of: ${Object.keys(HOUSE_SYSTEMS).join(', ')}`
+    );
+  }
+  return value;
+}
+
 class SwissEphemerisServer {
   constructor() {
     this.server = new Server(
@@ -68,6 +93,10 @@ class SwissEphemerisServer {
                   type: 'number',
                   description: 'Longitude in decimal degrees, positive east',
                 },
+                house_system: {
+                  type: 'string',
+                  description: 'House system code: P=Placidus (default), K=Koch, O=Porphyry, R=Regiomontanus, C=Campanus, E=Equal, W=Whole Sign, B=Alcabitus, M=Morinus, T=Topocentric.',
+                },
               },
               required: ['datetime', 'latitude', 'longitude'],
             },
@@ -89,6 +118,10 @@ class SwissEphemerisServer {
                 longitude: {
                   type: 'number',
                   description: 'Birth longitude in decimal degrees, positive east',
+                },
+                house_system: {
+                  type: 'string',
+                  description: 'House system code: P=Placidus (default), K=Koch, O=Porphyry, R=Regiomontanus, C=Campanus, E=Equal, W=Whole Sign, B=Alcabitus, M=Morinus, T=Topocentric.',
                 },
               },
               required: ['birth_datetime', 'latitude', 'longitude'],
@@ -123,6 +156,10 @@ class SwissEphemerisServer {
                 return_longitude: {
                   type: 'number',
                   description: 'Longitude for solar return location (optional, defaults to birth location)',
+                },
+                house_system: {
+                  type: 'string',
+                  description: 'House system code applied to both natal and solar return charts: P=Placidus (default), K=Koch, O=Porphyry, R=Regiomontanus, C=Campanus, E=Equal, W=Whole Sign, B=Alcabitus, M=Morinus, T=Topocentric.',
                 },
               },
               required: ['birth_datetime', 'birth_latitude', 'birth_longitude', 'return_year'],
@@ -166,6 +203,14 @@ class SwissEphemerisServer {
                   type: 'object',
                   description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}.',
                   additionalProperties: { type: 'number' },
+                },
+                person1_house_system: {
+                  type: 'string',
+                  description: 'House system code for person 1: P=Placidus (default), K=Koch, O=Porphyry, R=Regiomontanus, C=Campanus, E=Equal, W=Whole Sign, B=Alcabitus, M=Morinus, T=Topocentric.',
+                },
+                person2_house_system: {
+                  type: 'string',
+                  description: 'House system code for person 2: P=Placidus (default), K=Koch, O=Porphyry, R=Regiomontanus, C=Campanus, E=Equal, W=Whole Sign, B=Alcabitus, M=Morinus, T=Topocentric.',
                 },
               },
               required: ['person1_datetime', 'person1_latitude', 'person1_longitude', 'person2_datetime', 'person2_latitude', 'person2_longitude'],
@@ -211,6 +256,10 @@ class SwissEphemerisServer {
                   description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}.',
                   additionalProperties: { type: 'number' },
                 },
+                house_system: {
+                  type: 'string',
+                  description: 'House system code: P=Placidus (default), K=Koch, O=Porphyry, R=Regiomontanus, C=Campanus, E=Equal, W=Whole Sign, B=Alcabitus, M=Morinus, T=Topocentric.',
+                },
               },
               required: ['datetime', 'latitude', 'longitude'],
             },
@@ -244,7 +293,7 @@ class SwissEphemerisServer {
     });
   }
 
-  calculateEphemeris(datetime, latitude, longitude) {
+  calculateEphemeris(datetime, latitude, longitude, houseSystem = 'P') {
     try {
       const date = new Date(datetime);
       if (isNaN(date.getTime())) {
@@ -265,8 +314,8 @@ class SwissEphemerisServer {
         throw new Error(`Failed to execute swetest for planets: ${error.message}`);
       }
 
-      // Execute swetest for houses (Placidus system)
-      const houseCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -house${longitude},${latitude},P -fPZ -g, -head`;
+      // Execute swetest for houses
+      const houseCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -house${longitude},${latitude},${houseSystem} -fPZ -g, -head`;
       let houseOutput;
       try {
         houseOutput = execSync(houseCmd, { encoding: 'utf8' });
@@ -438,7 +487,8 @@ class SwissEphemerisServer {
         coordinates: {
           latitude,
           longitude
-        }
+        },
+        house_system: houseSystem
       };
 
     } catch (error) {
@@ -559,8 +609,8 @@ class SwissEphemerisServer {
   async handleToolCall(name, args) {
     switch (name) {
       case 'calculate_planetary_positions':
-        const { datetime, latitude, longitude } = args;
-        
+        const { datetime, latitude, longitude, house_system } = args;
+
         if (!datetime || typeof datetime !== 'string') {
           throw new McpError(
             ErrorCode.InvalidParams,
@@ -582,11 +632,11 @@ class SwissEphemerisServer {
           );
         }
 
-        return this.calculateEphemeris(datetime, latitude, longitude);
+        return this.calculateEphemeris(datetime, latitude, longitude, validateHouseSystem(house_system));
 
       case 'calculate_transits':
-        const { birth_datetime, latitude: birth_latitude, longitude: birth_longitude } = args;
-        
+        const { birth_datetime, latitude: birth_latitude, longitude: birth_longitude, house_system: transit_house_system } = args;
+
         if (!birth_datetime || typeof birth_datetime !== 'string') {
           throw new McpError(
             ErrorCode.InvalidParams,
@@ -608,13 +658,15 @@ class SwissEphemerisServer {
           );
         }
 
+        const validatedTransitHouseSystem = validateHouseSystem(transit_house_system);
+
         // Calculate birth chart
-        const natalChart = this.calculateEphemeris(birth_datetime, birth_latitude, birth_longitude);
- 
+        const natalChart = this.calculateEphemeris(birth_datetime, birth_latitude, birth_longitude, validatedTransitHouseSystem);
+
          // Calculate current transits
          const currentDate = new Date();
          const currentISOString = currentDate.toISOString();
-         const currentEphemeris = this.calculateEphemeris(currentISOString, birth_latitude, birth_longitude);
+         const currentEphemeris = this.calculateEphemeris(currentISOString, birth_latitude, birth_longitude, validatedTransitHouseSystem);
  
          return {
            natal_chart: natalChart,
@@ -623,7 +675,7 @@ class SwissEphemerisServer {
          };
 
       case 'calculate_solar_revolution':
-        const { birth_datetime: sr_birth_datetime, birth_latitude: sr_birth_latitude, birth_longitude: sr_birth_longitude, return_year, return_latitude, return_longitude } = args;
+        const { birth_datetime: sr_birth_datetime, birth_latitude: sr_birth_latitude, birth_longitude: sr_birth_longitude, return_year, return_latitude, return_longitude, house_system: sr_house_system } = args;
 
         if (!sr_birth_datetime || typeof sr_birth_datetime !== 'string') {
           throw new McpError(
@@ -653,21 +705,23 @@ class SwissEphemerisServer {
           );
         }
 
+        const validatedSrHouseSystem = validateHouseSystem(sr_house_system);
+
         // Calculate birth chart to get natal Sun position
-        const srNatalChart = this.calculateEphemeris(sr_birth_datetime, sr_birth_latitude, sr_birth_longitude);
+        const srNatalChart = this.calculateEphemeris(sr_birth_datetime, sr_birth_latitude, sr_birth_longitude, validatedSrHouseSystem);
         const natalSunLongitude = srNatalChart.planets.Sun.longitude;
 
         // Calculate solar return chart for the given year
         // Use the birthday in the return year as a starting point
         const birthDate = new Date(sr_birth_datetime);
         const returnDate = new Date(return_year, birthDate.getMonth(), birthDate.getDate(), birthDate.getHours(), birthDate.getMinutes(), birthDate.getSeconds());
-        
+
         // Use return location if provided, otherwise use birth location
         const returnLat = return_latitude !== undefined ? return_latitude : sr_birth_latitude;
         const returnLon = return_longitude !== undefined ? return_longitude : sr_birth_longitude;
-        
+
         // Calculate the solar return chart at the approximate return date
-        const solarReturnChart = this.calculateEphemeris(returnDate.toISOString(), returnLat, returnLon);
+        const solarReturnChart = this.calculateEphemeris(returnDate.toISOString(), returnLat, returnLon, validatedSrHouseSystem);
 
         return {
           natal_chart: srNatalChart,
@@ -680,7 +734,8 @@ class SwissEphemerisServer {
             coordinates: {
               latitude: returnLat,
               longitude: returnLon
-            }
+            },
+            house_system: validatedSrHouseSystem
           },
           natal_sun_longitude: natalSunLongitude,
           return_sun_longitude: solarReturnChart.planets.Sun.longitude,
@@ -688,7 +743,7 @@ class SwissEphemerisServer {
         };
 
       case 'calculate_synastry':
-        const { person1_datetime, person1_latitude, person1_longitude, person2_datetime, person2_latitude, person2_longitude, include_minor: synastry_include_minor, orb_overrides: synastry_orb_overrides } = args;
+        const { person1_datetime, person1_latitude, person1_longitude, person2_datetime, person2_latitude, person2_longitude, include_minor: synastry_include_minor, orb_overrides: synastry_orb_overrides, person1_house_system, person2_house_system } = args;
 
         if (synastry_include_minor !== undefined && typeof synastry_include_minor !== 'boolean') {
           throw new McpError(ErrorCode.InvalidParams, 'include_minor must be a boolean');
@@ -750,10 +805,10 @@ class SwissEphemerisServer {
         }
 
         // Calculate person 1's natal chart
-        const person1NatalChart = this.calculateEphemeris(person1_datetime, person1_latitude, person1_longitude);
+        const person1NatalChart = this.calculateEphemeris(person1_datetime, person1_latitude, person1_longitude, validateHouseSystem(person1_house_system, 'person1_house_system'));
 
         // Calculate person 2's natal chart
-        const person2NatalChart = this.calculateEphemeris(person2_datetime, person2_latitude, person2_longitude);
+        const person2NatalChart = this.calculateEphemeris(person2_datetime, person2_latitude, person2_longitude, validateHouseSystem(person2_house_system, 'person2_house_system'));
 
         // Calculate aspects between the two charts
         const aspects = this.calculateSynastryAspects(person1NatalChart.planets, person2NatalChart.planets, {
@@ -778,6 +833,7 @@ class SwissEphemerisServer {
           include_south_node,
           bodies: aspects_bodies,
           orb_overrides,
+          house_system: aspects_house_system,
         } = args;
 
         if (!aspects_datetime || typeof aspects_datetime !== 'string') {
@@ -821,7 +877,7 @@ class SwissEphemerisServer {
           throw new McpError(ErrorCode.InvalidParams, 'orb_overrides must be an object');
         }
 
-        const aspectsEphemerisResult = this.calculateEphemeris(aspects_datetime, aspects_latitude, aspects_longitude);
+        const aspectsEphemerisResult = this.calculateEphemeris(aspects_datetime, aspects_latitude, aspects_longitude, validateHouseSystem(aspects_house_system));
         const { aspects: chartAspects, settings_used } = this.calculateChartAspects(aspectsEphemerisResult, {
           includeMinor: include_minor,
           includeAngles: include_angles,

@@ -65,12 +65,14 @@ Calculate astronomical data for a specific date, time, and location.
 - `datetime` (string): ISO8601 format, e.g., "1985-04-12T23:20:50Z"
 - `latitude` (number): Latitude in decimal degrees (-90 to 90)
 - `longitude` (number): Longitude in decimal degrees (-180 to 180)
+- `house_system` (string, optional): House system code. Default `P`. See [House Systems](#house-systems).
 
 **Returns:**
 - `planets`: Positions of all planets and celestial bodies
 - `houses`: 12 astrological houses
 - `chart_points`: Ascendant, Midheaven, IC, Descendant
 - `additional_points`: South Node, Part of Fortune
+- `house_system`: The house system code actually used
 
 ### `calculate_transits`
 
@@ -80,6 +82,7 @@ Calculate birth chart positions and current transits for comparison.
 - `birth_datetime` (string): Birth datetime in ISO8601 format
 - `latitude` (number): Birth latitude in decimal degrees
 - `longitude` (number): Birth longitude in decimal degrees
+- `house_system` (string, optional): House system code applied to both charts. Default `P`. See [House Systems](#house-systems).
 
 **Returns:**
 - `natal_chart`: Complete birth chart data
@@ -97,6 +100,7 @@ Calculate solar return chart for a specific year (when Sun returns to natal posi
 - `return_year` (number): Year for solar return calculation (e.g., 2024)
 - `return_latitude` (number, optional): Solar return location latitude
 - `return_longitude` (number, optional): Solar return location longitude
+- `house_system` (string, optional): House system code applied to both natal and solar return charts. Default `P`. See [House Systems](#house-systems).
 
 **Returns:**
 - `natal_chart`: Original birth chart data
@@ -116,6 +120,8 @@ Calculate synastry chart between two people for relationship compatibility analy
 - `person2_datetime` (string): Person 2 birth datetime in ISO8601 format
 - `person2_latitude` (number): Person 2 birth latitude in decimal degrees
 - `person2_longitude` (number): Person 2 birth longitude in decimal degrees
+- `person1_house_system` (string, optional): House system code for person 1. Default `P`. See [House Systems](#house-systems).
+- `person2_house_system` (string, optional): House system code for person 2. Default `P`.
 
 **Returns:**
 - `person1_chart`: Complete birth chart for person 1
@@ -136,11 +142,31 @@ Calculate natal chart aspects for a given datetime and coordinates. Returns plan
 - `include_south_node` (boolean, optional): Include South Node in aspect calculations. Default `false`.
 - `bodies` (array of strings, optional): Override the default aspect body list. Must be names known to the server.
 - `orb_overrides` (object, optional): Per-aspect orb overrides in degrees, e.g. `{"conjunction": 10}`.
+- `house_system` (string, optional): House system code. Default `P`. See [House Systems](#house-systems).
 
 **Returns:**
-- All fields from `calculate_planetary_positions` (`planets`, `houses`, `chart_points`, `additional_points`, `datetime`, `coordinates`)
+- All fields from `calculate_planetary_positions` (`planets`, `houses`, `chart_points`, `additional_points`, `datetime`, `coordinates`, `house_system`)
 - `aspects`: Array of qualifying aspects, sorted by orb ascending. Each entry has `body_a`, `body_b`, `aspect`, `category` (`major`/`minor`), `aspect_angle`, `separation`, `orb`, `orb_allowed`, and `applying` (`true`/`false`/`null` — `null` when applying/separating cannot be determined, e.g. angle points with no speed, near-stationary bodies, or an exact hit).
 - `settings_used`: The resolved settings (`include_minor_aspects`, `include_angles`, `include_south_node`, `bodies`, `orb_overrides`) actually applied to the calculation.
+
+## House Systems
+
+Any tool that computes houses accepts an optional `house_system` code (default `P`):
+
+| Code | System |
+|------|--------|
+| `P` | Placidus (default) |
+| `K` | Koch |
+| `O` | Porphyry |
+| `R` | Regiomontanus |
+| `C` | Campanus |
+| `E` | Equal |
+| `W` | Whole Sign |
+| `B` | Alcabitus |
+| `M` | Morinus |
+| `T` | Polich/Page (Topocentric) |
+
+An unknown code returns an `InvalidParams` error listing the valid codes.
 
 ## Docker
 
