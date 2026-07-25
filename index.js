@@ -139,7 +139,7 @@ class SwissEphemerisServer {
                 },
                 include_angles: {
                   type: 'boolean',
-                  description: 'Include chart angles (Ascendant, Midheaven, IC, Descendant, Part of Fortune) in transit_aspects. Default false.',
+                  description: "Include the natal chart's angles (Ascendant, Midheaven, IC, Descendant, Part of Fortune) as targets in transit_aspects. Transiting angles are never aspected - they depend on the moment's location and sweep the whole zodiac daily. Default false.",
                 },
                 include_south_node: {
                   type: 'boolean',
@@ -644,7 +644,16 @@ class SwissEphemerisServer {
     } = options;
 
     const { bodiesWithLonSpeed: natalBodies, requestedBodies } = this.resolveAspectBodies(natalChart, options);
-    const { bodiesWithLonSpeed: transitBodies } = this.resolveAspectBodies(transitChart, options);
+
+    // Angles and Part of Fortune are artifacts of the moment's location and time of day:
+    // the transiting Ascendant sweeps the whole zodiac every day, so a transit-side angle
+    // contact is a different contact a few minutes later. include_angles adds angles to the
+    // natal side only. Filtered here rather than by passing includeAngles: false because an
+    // explicit `bodies` array bypasses that flag - the flag gating lives in
+    // calculateNatalAspects, which the cross-chart engine never calls.
+    const angleSet = new Set(ANGLE_BODIES);
+    const { bodiesWithLonSpeed: allTransitBodies } = this.resolveAspectBodies(transitChart, options);
+    const transitBodies = allTransitBodies.filter((b) => !angleSet.has(b.name));
 
     const aspects = calculateCrossChartAspects(transitBodies, natalBodies, {
       includeMinor,
