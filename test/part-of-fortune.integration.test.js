@@ -4,6 +4,7 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { SwissEphemerisServer } from '../index.js';
+import { DAY_CHART, NIGHT_CHART, SOUTHERN_CHART, houseOf } from './fixtures/charts.js';
 
 if (!process.env.SE_EPHE_PATH) {
   process.env.SE_EPHE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../vendor/swisseph');
@@ -20,40 +21,61 @@ function swetestAvailable() {
 
 const HAS_SWETEST = swetestAvailable();
 
-test('Part of Fortune uses the day formula (ASC + Moon - Sun) when the Sun is above the horizon (houses 7-12)', { skip: !HAS_SWETEST }, async () => {
-  const server = new SwissEphemerisServer();
-  // Synthetic day chart (Greenwich, noon).
-  const result = await server.handleToolCall('calculate_planetary_positions', {
-    datetime: '1990-01-01T12:00:00Z', latitude: 51.4769, longitude: 0.0,
-  });
-  const sunHouse = Object.entries(result.houses).find(([, h]) => h.longitude === result.houses['11'].longitude)[0];
-  assert.equal(sunHouse, '11');
+const norm = (deg) => (((deg % 360) + 360) % 360);
+const dayFormula = ({ asc, sun, moon }) => norm(asc + moon - sun);
+const nightFormula = ({ asc, sun, moon }) => norm(asc + sun - moon);
 
-  const asc = result.chart_points.Ascendant.longitude;
-  const sun = result.planets.Sun.longitude;
-  const moon = result.planets.Moon.longitude;
-  const expected = (((asc + moon - sun) % 360) + 360) % 360;
-  assert.ok(Math.abs(result.additional_points['Part of Fortune'].longitude - expected) < 1e-6);
+async function chartFor(fixture) {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_planetary_positions', {
+    datetime: fixture.datetime,
+    latitude: fixture.latitude,
+    longitude: fixture.longitude,
+  });
+  return {
+    result,
+    asc: result.chart_points.Ascendant.longitude,
+    sun: result.planets.Sun.longitude,
+    moon: result.planets.Moon.longitude,
+    fortune: result.additional_points['Part of Fortune'].longitude,
+    sunHouse: houseOf(result.planets.Sun.longitude, result.houses),
+  };
+}
+
+test('Part of Fortune uses the day formula (ASC + Moon - Sun) when the Sun is above the horizon', { skip: !HAS_SWETEST }, async () => {
+  const c = await chartFor(DAY_CHART);
+
+  assert.equal(c.sunHouse, DAY_CHART.expected.sunHouse, 'fixture should be a day chart');
+  assert.ok(c.sunHouse >= 7 && c.sunHouse <= 12, 'Sun should be above the horizon');
+
+  assert.ok(Math.abs(c.fortune - dayFormula(c)) < 1e-6, 'should match the day formula');
+  assert.ok(Math.abs(c.fortune - nightFormula(c)) > 1, 'should NOT match the night formula');
+  assert.ok(Math.abs(c.fortune - DAY_CHART.expected.partOfFortune) < 0.001);
 });
 
-test('Part of Fortune uses the night formula (ASC + Sun - Moon) when the Sun is below the horizon (houses 1-6)', { skip: !HAS_SWETEST }, async () => {
-  const server = new SwissEphemerisServer();
-  // Synthetic night chart (Greenwich, midnight).
-  const result = await server.handleToolCall('calculate_planetary_positions', {
-    datetime: '1990-01-01T00:00:00Z', latitude: 51.4769, longitude: 0.0,
-  });
+test('Part of Fortune uses the night formula (ASC + Sun - Moon) when the Sun is below the horizon', { skip: !HAS_SWETEST }, async () => {
+  const c = await chartFor(NIGHT_CHART);
 
-  const asc = result.chart_points.Ascendant.longitude;
-  const sun = result.planets.Sun.longitude;
-  const moon = result.planets.Moon.longitude;
-  const dayFormula = (((asc + moon - sun) % 360) + 360) % 360;
-  const nightFormula = (((asc + sun - moon) % 360) + 360) % 360;
+  assert.equal(c.sunHouse, NIGHT_CHART.expected.sunHouse, 'fixture should be a night chart');
+  assert.ok(c.sunHouse >= 1 && c.sunHouse <= 6, 'Sun should be below the horizon');
 
-  const actual = result.additional_points['Part of Fortune'].longitude;
-  assert.ok(Math.abs(actual - nightFormula) < 1e-6, 'should match the night formula');
-  assert.ok(Math.abs(actual - dayFormula) > 1, 'should NOT match the day formula');
+  assert.ok(Math.abs(c.fortune - nightFormula(c)) < 1e-6, 'should match the night formula');
+  assert.ok(Math.abs(c.fortune - dayFormula(c)) > 1, 'should NOT match the day formula');
+  assert.ok(Math.abs(c.fortune - NIGHT_CHART.expected.partOfFortune) < 0.001);
+});
 
-  // Cross-check against the known-correct value transcribed in charts/people/<name>.md (15deg07m Taurus).
-  assert.equal(result.additional_points['Part of Fortune'].sign, 'Taurus');
-  assert.ok(Math.abs(result.additional_points['Part of Fortune'].degree - 15.11) < 0.05);
+test('sect is determined by the Sun house, not by the hemisphere', { skip: !HAS_SWETEST }, async () => {
+  const c = await chartFor(SOUTHERN_CHART);
+
+  assert.equal(c.sunHouse, SOUTHERN_CHART.expected.sunHouse);
+  assert.ok(Math.abs(c.fortune - dayFormula(c)) < 1e-6, 'southern day chart still uses the day formula');
+  assert.ok(Math.abs(c.fortune - SOUTHERN_CHART.expected.partOfFortune) < 0.001);
+});
+
+test('the two Greenwich fixtures differ only by sect, so they exercise both branches', { skip: !HAS_SWETEST }, async () => {
+  const day = await chartFor(DAY_CHART);
+  const night = await chartFor(NIGHT_CHART);
+
+  assert.notEqual(day.sunHouse >= 7, night.sunHouse >= 7, 'one above the horizon, one below');
+  assert.ok(Math.abs(day.fortune - night.fortune) > 1, 'the two branches produce different results');
 });

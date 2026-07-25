@@ -1,0 +1,5 @@
+node_modules
+
+# Agent working files. Plans routinely quote local absolute paths (/Users/<name>/...)
+# and scratch notes, none of which belong in a public repo. See CLAUDE.md.
+.claude/
