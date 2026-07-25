@@ -4,6 +4,7 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { SwissEphemerisServer } from '../index.js';
+import { ALL_CHARTS } from './fixtures/charts.js';
 
 if (!process.env.SE_EPHE_PATH) {
   process.env.SE_EPHE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../vendor/swisseph');
@@ -169,4 +170,35 @@ test('unknown body in bodies param throws InvalidParams', { skip: !HAS_SWETEST }
     }),
     /Unknown body/
   );
+});
+
+// The point resolver in lib/aspects.js walks planets -> chart_points -> additional_points and
+// returns the first hit, which is only safe while those buckets share no key. Nothing in the
+// chart builder enforces that, so assert it against every fixture: a collision would make
+// resolution order silently significant, which is the failure mode behind #8.
+test('a chart\'s three point buckets share no keys', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+
+  for (const fixture of ALL_CHARTS) {
+    const chart = await server.handleToolCall('calculate_planetary_positions', {
+      datetime: fixture.datetime,
+      latitude: fixture.latitude,
+      longitude: fixture.longitude,
+    });
+
+    const buckets = ['planets', 'chart_points', 'additional_points'];
+    const seen = new Map();
+
+    for (const bucket of buckets) {
+      for (const name of Object.keys(chart[bucket] ?? {})) {
+        const previous = seen.get(name);
+        assert.equal(
+          previous,
+          undefined,
+          `${fixture.label}: "${name}" appears in both ${previous} and ${bucket}`
+        );
+        seen.set(name, bucket);
+      }
+    }
+  }
 });

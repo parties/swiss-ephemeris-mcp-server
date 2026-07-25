@@ -29,6 +29,7 @@ import {
   calculateCrossChartAspects,
   calculateHouseOverlay,
   findHouseForLongitude,
+  toAspectBody,
 } from './lib/aspects.js';
 
 const SYNASTRY_BODIES = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
@@ -592,30 +593,11 @@ class SwissEphemerisServer {
       bodySet.add('South Node');
     }
 
-    const angleSet = new Set(ANGLE_BODIES);
     const bodiesWithLonSpeed = [];
 
     for (const name of bodySet) {
-      let longitude;
-      let speed;
-
-      if (ephemerisResult.planets[name]) {
-        longitude = ephemerisResult.planets[name].longitude;
-        speed = ephemerisResult.planets[name].speed ?? null;
-      } else if (name === 'South Node' && ephemerisResult.additional_points['South Node']) {
-        longitude = ephemerisResult.additional_points['South Node'].longitude;
-        speed = null;
-      } else if (name === 'Part of Fortune' && ephemerisResult.additional_points['Part of Fortune']) {
-        longitude = ephemerisResult.additional_points['Part of Fortune'].longitude;
-        speed = null;
-      } else if (angleSet.has(name) && ephemerisResult.chart_points[name]) {
-        longitude = ephemerisResult.chart_points[name].longitude;
-        speed = null;
-      } else {
-        continue;
-      }
-
-      bodiesWithLonSpeed.push({ name, longitude, speed });
+      const body = toAspectBody(ephemerisResult, name);
+      if (body) bodiesWithLonSpeed.push(body);
     }
 
     return { bodiesWithLonSpeed, requestedBodies };
@@ -723,16 +705,12 @@ class SwissEphemerisServer {
   // Cross-chart aspects involving ANGLE_BODIES (Ascendant/Midheaven/IC/Descendant/Part of Fortune):
   // person1 planets -> person2 angles, person2 planets -> person1 angles, and angle-to-angle.
   calculateSynastryAngleAspects(person1Chart, person2Chart, options = {}) {
-    const toPlanetBodies = (chart) => SYNASTRY_BODIES
-      .filter((name) => chart.planets[name])
-      .map((name) => ({ name, longitude: chart.planets[name].longitude, speed: chart.planets[name].speed ?? null }));
+    const toBodies = (chart, names) => names
+      .map((name) => toAspectBody(chart, name))
+      .filter(Boolean);
 
-    // Angles live in chart_points, but Part of Fortune is written to additional_points.
-    const anglePoint = (chart, name) => chart.chart_points?.[name] ?? chart.additional_points?.[name];
-
-    const toAngleBodies = (chart) => ANGLE_BODIES
-      .filter((name) => anglePoint(chart, name))
-      .map((name) => ({ name, longitude: anglePoint(chart, name).longitude, speed: null }));
+    const toPlanetBodies = (chart) => toBodies(chart, SYNASTRY_BODIES);
+    const toAngleBodies = (chart) => toBodies(chart, ANGLE_BODIES);
 
     const person1Planets = toPlanetBodies(person1Chart);
     const person2Planets = toPlanetBodies(person2Chart);
