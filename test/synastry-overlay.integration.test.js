@@ -4,6 +4,7 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { SwissEphemerisServer } from '../index.js';
+import { ANGLE_BODIES } from '../lib/aspects.js';
 import { DAY_CHART, PARTNER_CHART } from './fixtures/charts.js';
 
 if (!process.env.SE_EPHE_PATH) {
@@ -50,7 +51,8 @@ test('calculate_synastry include_angles surfaces planet-to-angle and angle-to-an
   assert.ok(Array.isArray(result.angle_aspects));
   assert.ok(result.angle_aspects.length > 0, 'expect at least one angle contact across major aspects for this pair');
 
-  const anglePoints = new Set(['Ascendant', 'Midheaven', 'IC', 'Descendant', 'Part of Fortune']);
+  // Derived from the constant, so adding a body to ANGLE_BODIES cannot leave this set stale.
+  const anglePoints = new Set(ANGLE_BODIES);
   const hasAngleInvolved = result.angle_aspects.every(
     (a) => anglePoints.has(a.person1_point) || anglePoints.has(a.person2_point)
   );
