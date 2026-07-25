@@ -73,7 +73,7 @@ Calculate astronomical data for a specific date, time, and location.
 - `planets`: Positions of all planets and celestial bodies
 - `houses`: 12 astrological houses
 - `chart_points`: Ascendant, Midheaven, IC, Descendant
-- `additional_points`: South Node, Part of Fortune
+- `additional_points`: South Node, Part of Fortune — computed with the traditional day-chart formula (`Ascendant + Moon - Sun`) when the Sun is in houses 7-12, or the night-chart formula (`Ascendant + Sun - Moon`) when the Sun is in houses 1-6.
 - `house_system`: The house system code actually used
 - `warnings` (only present if something's missing): if an ephemeris data file needed for a body isn't found under `SE_EPHE_PATH`, that body is omitted from `planets` entirely rather than reported at a fabricated 0° Aries position, and a message naming the missing file is added here.
 

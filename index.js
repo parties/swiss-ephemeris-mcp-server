@@ -28,6 +28,7 @@ import {
   calculateNatalAspects,
   calculateCrossChartAspects,
   calculateHouseOverlay,
+  findHouseForLongitude,
 } from './lib/aspects.js';
 
 const SYNASTRY_BODIES = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
@@ -466,12 +467,18 @@ class SwissEphemerisServer {
         };
       }
 
-      // Calculate Part of Fortune (ASC + Moon - Sun)
+      // Calculate Part of Fortune: ASC + Moon - Sun for a day chart (Sun above the
+      // horizon, houses 7-12), ASC + Sun - Moon for a night chart (Sun below the
+      // horizon, houses 1-6) - the traditional day/night distinction.
       if (chartPoints.Ascendant && planets.Sun && planets.Moon) {
         const ascLon = chartPoints.Ascendant.longitude;
         const sunLon = planets.Sun.longitude;
         const moonLon = planets.Moon.longitude;
-        let fortuneLon = (ascLon + moonLon - sunLon) % 360;
+        const sunHouse = findHouseForLongitude(sunLon, houses);
+        const isNightChart = sunHouse !== null && sunHouse <= 6;
+        let fortuneLon = isNightChart
+          ? (ascLon + sunLon - moonLon) % 360
+          : (ascLon + moonLon - sunLon) % 360;
         if (fortuneLon < 0) fortuneLon += 360;
         
         const signIndex = Math.floor(fortuneLon / 30);
