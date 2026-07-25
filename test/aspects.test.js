@@ -2,10 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   EPSILON_DEG,
+  ANGLE_BODIES,
   normalizeSeparation,
   computeApplying,
   calculateNatalAspects,
   calculateHouseOverlay,
+  resolveChartPoint,
+  toAspectBody,
 } from '../lib/aspects.js';
 
 test('normalizeSeparation wraps around 0/360 seam (350 vs 10 -> sep 20, not 340)', () => {
@@ -149,4 +152,41 @@ test('calculateHouseOverlay handles the 360/0 wraparound (house 12 into house 1)
   const houses = equalHouses(350); // house 1 starts at 350, house 12 starts at 320
   const overlay = calculateHouseOverlay([{ name: 'Moon', longitude: 5 }], houses);
   assert.equal(overlay.Moon, 1); // 5 deg is past the 350 cusp, wrapped
+});
+
+// A chart's points are split across three buckets by how they were computed. Resolving a
+// name from the wrong bucket is a silent drop rather than an error, which is how Part of
+// Fortune went missing from synastry angle_aspects (#8) - these lock the resolver down.
+// Shape-only stand-in: arbitrary longitudes, no birth data, so it belongs to nobody.
+const BUCKETED_CHART = {
+  planets: { Sun: { longitude: 10, speed: 0.98 } },
+  chart_points: { Ascendant: { longitude: 100 } },
+  additional_points: { 'Part of Fortune': { longitude: 200 } },
+};
+
+test('resolveChartPoint finds a point in any of the three buckets', () => {
+  assert.equal(resolveChartPoint(BUCKETED_CHART, 'Sun').longitude, 10);
+  assert.equal(resolveChartPoint(BUCKETED_CHART, 'Ascendant').longitude, 100);
+  assert.equal(resolveChartPoint(BUCKETED_CHART, 'Part of Fortune').longitude, 200);
+});
+
+test('resolveChartPoint returns null for a name no bucket carries', () => {
+  assert.equal(resolveChartPoint(BUCKETED_CHART, 'Vertex'), null);
+  assert.equal(resolveChartPoint({}, 'Sun'), null);
+});
+
+test('toAspectBody carries planet speed through and nulls it for static points', () => {
+  assert.deepEqual(toAspectBody(BUCKETED_CHART, 'Sun'), { name: 'Sun', longitude: 10, speed: 0.98 });
+  // Angles and derived points do not move on their own, so applying/separating is undefined
+  // for them - a null speed is what makes computeApplying return null downstream.
+  assert.deepEqual(toAspectBody(BUCKETED_CHART, 'Ascendant'), { name: 'Ascendant', longitude: 100, speed: null });
+  assert.deepEqual(toAspectBody(BUCKETED_CHART, 'Part of Fortune'), { name: 'Part of Fortune', longitude: 200, speed: null });
+  assert.equal(toAspectBody(BUCKETED_CHART, 'Vertex'), null);
+});
+
+// synastry-overlay.integration.test.js derives its expected angle set from ANGLE_BODIES, so
+// it cannot go stale - but it also cannot catch the constant itself gaining a wrong member.
+// This is the assertion that would fail if someone added a planet to it.
+test('ANGLE_BODIES membership is pinned', () => {
+  assert.deepEqual(ANGLE_BODIES, ['Ascendant', 'Midheaven', 'IC', 'Descendant', 'Part of Fortune']);
 });
