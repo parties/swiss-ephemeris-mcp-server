@@ -232,7 +232,7 @@ class SwissEphemerisServer {
                 },
                 include_angles: {
                   type: 'boolean',
-                  description: 'Include cross-chart aspects to chart angles (Ascendant, Midheaven, IC, Descendant) in addition to planet-planet aspects. Default false.',
+                  description: 'Include cross-chart aspects to chart angles (Ascendant, Midheaven, IC, Descendant, Part of Fortune) in addition to planet-planet aspects. Default false.',
                 },
                 orb_overrides: {
                   type: 'object',
@@ -720,7 +720,7 @@ class SwissEphemerisServer {
     }));
   }
 
-  // Cross-chart aspects involving chart angles (Ascendant/Midheaven/IC/Descendant):
+  // Cross-chart aspects involving ANGLE_BODIES (Ascendant/Midheaven/IC/Descendant/Part of Fortune):
   // person1 planets -> person2 angles, person2 planets -> person1 angles, and angle-to-angle.
   calculateSynastryAngleAspects(person1Chart, person2Chart, options = {}) {
     const toPlanetBodies = (chart) => SYNASTRY_BODIES

@@ -89,5 +89,5 @@ test('calculate_synastry include_angles aspects Part of Fortune', { skip: !HAS_S
     (a) => a.person2_point === 'Part of Fortune' && a.person1_point === 'Sun' && a.aspect === 'sextile'
   );
   assert.ok(sunSextile, 'expect P2 Fortune sextile P1 Sun');
-  assert.ok(Math.abs(Number(sunSextile.orb) - 2.10) < 0.2, `unexpected orb ${sunSextile.orb}`);
+  assert.equal(sunSextile.orb, '2.10');
 });

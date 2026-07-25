@@ -141,7 +141,7 @@ Calculate synastry chart between two people for relationship compatibility analy
 - `person2_chart`: Complete birth chart for person 2
 - `synastry_aspects`: Array of planetary aspects between the charts
 - `house_overlay`: `{ person1_planets_in_person2_houses, person2_planets_in_person1_houses }` — for each of the 10 major bodies, which house (1-12) of the other person's chart it falls into
-- `angle_aspects` (only present when `include_angles` is `true`): Array of aspects involving Ascendant/Midheaven/IC/Descendant across the two charts, same shape as `synastry_aspects` but with `person1_point`/`person2_point` instead of `_planet`
+- `angle_aspects` (only present when `include_angles` is `true`): Array of aspects involving Ascendant/Midheaven/IC/Descendant/Part of Fortune across the two charts, same shape as `synastry_aspects` but with `person1_point`/`person2_point` instead of `_planet`
 - `calculation_time`: Timestamp of calculation
 
 ### `calculate_aspects`
