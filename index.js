@@ -727,9 +727,12 @@ class SwissEphemerisServer {
       .filter((name) => chart.planets[name])
       .map((name) => ({ name, longitude: chart.planets[name].longitude, speed: chart.planets[name].speed ?? null }));
 
+    // Angles live in chart_points, but Part of Fortune is written to additional_points.
+    const anglePoint = (chart, name) => chart.chart_points?.[name] ?? chart.additional_points?.[name];
+
     const toAngleBodies = (chart) => ANGLE_BODIES
-      .filter((name) => chart.chart_points[name])
-      .map((name) => ({ name, longitude: chart.chart_points[name].longitude, speed: null }));
+      .filter((name) => anglePoint(chart, name))
+      .map((name) => ({ name, longitude: anglePoint(chart, name).longitude, speed: null }));
 
     const person1Planets = toPlanetBodies(person1Chart);
     const person2Planets = toPlanetBodies(person2Chart);

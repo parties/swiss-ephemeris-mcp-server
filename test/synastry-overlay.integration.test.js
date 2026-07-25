@@ -4,6 +4,7 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { SwissEphemerisServer } from '../index.js';
+import { DAY_CHART, PARTNER_CHART } from './fixtures/charts.js';
 
 if (!process.env.SE_EPHE_PATH) {
   process.env.SE_EPHE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../vendor/swisseph');
@@ -49,7 +50,7 @@ test('calculate_synastry include_angles surfaces planet-to-angle and angle-to-an
   assert.ok(Array.isArray(result.angle_aspects));
   assert.ok(result.angle_aspects.length > 0, 'expect at least one angle contact across major aspects for this pair');
 
-  const anglePoints = new Set(['Ascendant', 'Midheaven', 'IC', 'Descendant']);
+  const anglePoints = new Set(['Ascendant', 'Midheaven', 'IC', 'Descendant', 'Part of Fortune']);
   const hasAngleInvolved = result.angle_aspects.every(
     (a) => anglePoints.has(a.person1_point) || anglePoints.has(a.person2_point)
   );
@@ -58,4 +59,35 @@ test('calculate_synastry include_angles surfaces planet-to-angle and angle-to-an
   for (let i = 1; i < result.angle_aspects.length; i++) {
     assert.ok(Number(result.angle_aspects[i - 1].orb) <= Number(result.angle_aspects[i].orb));
   }
+});
+
+// Part of Fortune lives in additional_points, not chart_points; a lookup against the wrong
+// bucket dropped it from every angle_aspects response without warning.
+test('calculate_synastry include_angles aspects Part of Fortune', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_synastry', {
+    person1_datetime: DAY_CHART.datetime,
+    person1_latitude: DAY_CHART.latitude,
+    person1_longitude: DAY_CHART.longitude,
+    person2_datetime: PARTNER_CHART.datetime,
+    person2_latitude: PARTNER_CHART.latitude,
+    person2_longitude: PARTNER_CHART.longitude,
+    include_angles: true,
+  });
+
+  const fortuneRows = result.angle_aspects.filter(
+    (a) => a.person1_point === 'Part of Fortune' || a.person2_point === 'Part of Fortune'
+  );
+  assert.ok(fortuneRows.length > 0, 'expect at least one Part of Fortune contact for this pair');
+
+  // Both directions: person1 Fortune -> person2 planets, and person2 Fortune -> person1 points.
+  assert.ok(fortuneRows.some((a) => a.person1_point === 'Part of Fortune'), 'expect person1 Fortune contacts');
+  assert.ok(fortuneRows.some((a) => a.person2_point === 'Part of Fortune'), 'expect person2 Fortune contacts');
+
+  // P2 Fortune (342.917) sextile P1 Sun (280.82) — 2.10° orb.
+  const sunSextile = fortuneRows.find(
+    (a) => a.person2_point === 'Part of Fortune' && a.person1_point === 'Sun' && a.aspect === 'sextile'
+  );
+  assert.ok(sunSextile, 'expect P2 Fortune sextile P1 Sun');
+  assert.ok(Math.abs(Number(sunSextile.orb) - 2.10) < 0.2, `unexpected orb ${sunSextile.orb}`);
 });
