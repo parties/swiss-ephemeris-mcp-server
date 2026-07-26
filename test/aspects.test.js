@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import {
   EPSILON_DEG,
   ANGLE_BODIES,
+  DEFAULT_ORBS,
+  ORB_CLASSES,
+  BODY_ORB_CLASS,
   normalizeSeparation,
   computeApplying,
   calculateNatalAspects,
@@ -189,4 +192,52 @@ test('toAspectBody carries planet speed through and nulls it for static points',
 // This is the assertion that would fail if someone added a planet to it.
 test('ANGLE_BODIES membership is pinned', () => {
   assert.deepEqual(ANGLE_BODIES, ['Ascendant', 'Midheaven', 'IC', 'Descendant', 'Part of Fortune']);
+});
+
+// SUP-157: the orb-class engine seam. Every body/point resolves to a `body` or `point`
+// class, but `point` is still just a copy of DEFAULT_ORBS until T2 gives it real numbers -
+// so this ticket must change zero output.
+test('ORB_CLASSES.body is DEFAULT_ORBS, and point is still identical to it (T2 populates point)', () => {
+  assert.deepEqual(ORB_CLASSES.body, DEFAULT_ORBS);
+  assert.deepEqual(ORB_CLASSES.point, DEFAULT_ORBS);
+});
+
+test('BODY_ORB_CLASS maps every angle body (including Part of Fortune) to the point class', () => {
+  for (const name of ANGLE_BODIES) {
+    assert.equal(BODY_ORB_CLASS[name], 'point');
+  }
+});
+
+test('calculateNatalAspects: a body-class pair and a point-class pair resolve the same aspect identically (byte-identical output this ticket)', () => {
+  const bodyPair = [
+    { name: 'Sun', longitude: 0, speed: 1 },
+    { name: 'Moon', longitude: 95, speed: 13 }, // 95 deg -> square, orb 5
+  ];
+  const pointPair = [
+    { name: 'Ascendant', longitude: 0, speed: null },
+    { name: 'Part of Fortune', longitude: 95, speed: null },
+  ];
+
+  const [bodyAspect] = calculateNatalAspects(bodyPair, { includeAngles: true });
+  const [pointAspect] = calculateNatalAspects(pointPair, { includeAngles: true });
+
+  assert.equal(bodyAspect.aspect, 'square');
+  assert.equal(pointAspect.aspect, 'square');
+  assert.equal(bodyAspect.orb_allowed, pointAspect.orb_allowed);
+  assert.equal(bodyAspect.orb_allowed, DEFAULT_ORBS.square);
+});
+
+test('orb_overrides flat shape still applies globally across both classes', () => {
+  const bodies = [
+    { name: 'A', longitude: 0, speed: 0 },
+    { name: 'B', longitude: 95, speed: 0 }, // square, 5-degree orb
+  ];
+  const points = [
+    { name: 'Ascendant', longitude: 0, speed: null },
+    { name: 'Part of Fortune', longitude: 95, speed: null },
+  ];
+
+  const tightened = { orbOverrides: { square: 2 }, includeAngles: true };
+  assert.ok(!calculateNatalAspects(bodies, tightened).some((a) => a.aspect === 'square'));
+  assert.ok(!calculateNatalAspects(points, tightened).some((a) => a.aspect === 'square'));
 });
