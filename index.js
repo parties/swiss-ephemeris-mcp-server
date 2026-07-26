@@ -23,6 +23,7 @@ import {
 import {
   DEFAULT_ASPECT_BODIES,
   ANGLE_BODIES,
+  ASPECTABLE_ANGLES,
   calculateNatalAspects,
   calculateCrossChartAspects,
   calculateHouseOverlay,
@@ -584,7 +585,8 @@ class SwissEphemerisServer {
 
     const bodySet = new Set(requestedBodies);
     if (includeAngles) {
-      ANGLE_BODIES.forEach((b) => bodySet.add(b));
+      // DSC/IC are mirrors of ASC/MC and are never aspected - see ASPECTABLE_ANGLES.
+      ASPECTABLE_ANGLES.forEach((b) => bodySet.add(b));
     }
     if (includeSouthNode) {
       bodySet.add('South Node');
@@ -699,15 +701,17 @@ class SwissEphemerisServer {
     }));
   }
 
-  // Cross-chart aspects involving ANGLE_BODIES (Ascendant/Midheaven/IC/Descendant/Part of Fortune):
+  // Cross-chart aspects involving ASPECTABLE_ANGLES (Ascendant/Midheaven/Part of Fortune):
   // person1 planets -> person2 angles, person2 planets -> person1 angles, and angle-to-angle.
+  // DSC/IC are excluded here - they mirror ASC/MC, so aspecting them would double-count
+  // every axis contact under two labels. They remain available as computed chart points.
   calculateSynastryAngleAspects(person1Chart, person2Chart, options = {}) {
     const toBodies = (chart, names) => names
       .map((name) => toAspectBody(chart, name))
       .filter(Boolean);
 
     const toPlanetBodies = (chart) => toBodies(chart, SYNASTRY_BODIES);
-    const toAngleBodies = (chart) => toBodies(chart, ANGLE_BODIES);
+    const toAngleBodies = (chart) => toBodies(chart, ASPECTABLE_ANGLES);
 
     const person1Planets = toPlanetBodies(person1Chart);
     const person2Planets = toPlanetBodies(person2Chart);

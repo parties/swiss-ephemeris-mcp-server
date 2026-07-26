@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   EPSILON_DEG,
   ANGLE_BODIES,
+  ASPECTABLE_ANGLES,
   DEFAULT_ORBS,
   ORB_CLASSES,
   BODY_ORB_CLASS,
@@ -192,6 +193,28 @@ test('toAspectBody carries planet speed through and nulls it for static points',
 // This is the assertion that would fail if someone added a planet to it.
 test('ANGLE_BODIES membership is pinned', () => {
   assert.deepEqual(ANGLE_BODIES, ['Ascendant', 'Midheaven', 'IC', 'Descendant', 'Part of Fortune']);
+});
+
+// SUP-159: DSC=ASC+180 and IC=MC+180, so aspecting all four axis points double-counts every
+// contact under two labels. Only these three ever enter aspect pair-matching; DSC/IC remain
+// legitimate computed points via ANGLE_BODIES (chart_points/include_angles output).
+test('ASPECTABLE_ANGLES membership is pinned', () => {
+  assert.deepEqual(ASPECTABLE_ANGLES, ['Ascendant', 'Midheaven', 'Part of Fortune']);
+});
+
+test('calculateNatalAspects never aspects DSC/IC even when explicitly present in the body list', () => {
+  const bodies = [
+    { name: 'Ascendant', longitude: 0, speed: null },
+    { name: 'Descendant', longitude: 180, speed: null },
+    { name: 'Midheaven', longitude: 90, speed: null },
+    { name: 'IC', longitude: 270, speed: null },
+  ];
+  const aspects = calculateNatalAspects(bodies, { includeAngles: true });
+  const nonAspectable = new Set(['IC', 'Descendant']);
+  assert.ok(
+    !aspects.some((a) => nonAspectable.has(a.body_a) || nonAspectable.has(a.body_b)),
+    'DSC/IC should never appear as an aspected body'
+  );
 });
 
 // SUP-158: `point` gets its own, tighter numbers - 3 deg for the majors, 2 deg for sextile.

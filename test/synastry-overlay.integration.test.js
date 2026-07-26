@@ -4,7 +4,7 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { SwissEphemerisServer } from '../index.js';
-import { ANGLE_BODIES } from '../lib/aspects.js';
+import { ASPECTABLE_ANGLES } from '../lib/aspects.js';
 import { DAY_CHART, PARTNER_CHART } from './fixtures/charts.js';
 
 if (!process.env.SE_EPHE_PATH) {
@@ -51,12 +51,19 @@ test('calculate_synastry include_angles surfaces planet-to-angle and angle-to-an
   assert.ok(Array.isArray(result.angle_aspects));
   assert.ok(result.angle_aspects.length > 0, 'expect at least one angle contact across major aspects for this pair');
 
-  // Derived from the constant, so adding a body to ANGLE_BODIES cannot leave this set stale.
-  const anglePoints = new Set(ANGLE_BODIES);
+  // Derived from the constant, so adding a body to ASPECTABLE_ANGLES cannot leave this set stale.
+  const anglePoints = new Set(ASPECTABLE_ANGLES);
   const hasAngleInvolved = result.angle_aspects.every(
     (a) => anglePoints.has(a.person1_point) || anglePoints.has(a.person2_point)
   );
   assert.ok(hasAngleInvolved, 'every angle_aspects entry should involve at least one angle point');
+
+  // DSC/IC mirror ASC/MC and are never aspected - only ASC/MC/PoF are aspectable.
+  const nonAspectableAngles = new Set(['IC', 'Descendant']);
+  assert.ok(
+    !result.angle_aspects.some((a) => nonAspectableAngles.has(a.person1_point) || nonAspectableAngles.has(a.person2_point)),
+    'DSC/IC should never appear in angle_aspects'
+  );
 
   for (let i = 1; i < result.angle_aspects.length; i++) {
     assert.ok(Number(result.angle_aspects[i - 1].orb) <= Number(result.angle_aspects[i].orb));
@@ -119,9 +126,11 @@ test('calculate_synastry include_angles: point-class orb drops wide Fortune cont
     fortuneRows.some((a) => a.person1_point === 'Part of Fortune' && a.person2_point === 'Mars' && a.aspect === 'square' && a.orb === '2.38'),
     'P1 Fortune square P2 Mars (2.38 deg) should survive'
   );
+  // P1 IC trine P2 Fortune (2.92 deg) is NOT in this list - IC mirrors MC and is never
+  // aspected (SUP-159), even though it would otherwise fall inside the point-class orb.
   assert.ok(
-    fortuneRows.some((a) => a.person1_point === 'IC' && a.person2_point === 'Part of Fortune' && a.aspect === 'trine' && a.orb === '2.92'),
-    'P1 IC trine P2 Fortune (2.92 deg) should survive'
+    !fortuneRows.some((a) => a.person1_point === 'IC' || a.person2_point === 'IC'),
+    'IC should never appear in a Fortune contact - only ASC/MC/PoF are aspectable angles'
   );
 
   // Wide Fortune contacts that used to pass under the body-class 8/6-deg defaults now drop.
@@ -138,5 +147,5 @@ test('calculate_synastry include_angles: point-class orb drops wide Fortune cont
     'PoF square Saturn (7.10 deg) exceeds the point class 3-deg square orb and should drop'
   );
 
-  assert.equal(fortuneRows.length, 6, 'exactly six Fortune contacts survive the tighter point-class orb for this fixture pair');
+  assert.equal(fortuneRows.length, 5, 'exactly five Fortune contacts survive the tighter point-class orb for this fixture pair (IC excluded, SUP-159)');
 });
