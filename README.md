@@ -90,7 +90,7 @@ Calculate birth chart positions and current transits for comparison, including a
 - `include_angles` (boolean, optional): Include chart angles in `transit_aspects`. Default `false`.
 - `include_south_node` (boolean, optional): Include South Node in `transit_aspects`. Default `false`.
 - `bodies` (array of strings, optional): Override the default body list for `transit_aspects`.
-- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees for `transit_aspects`. Also accepts a per-class shape, e.g. `{"point": {"square": 2}}`, to move only the `point` class (angles, Part of Fortune, Vertex) without touching `body`.
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees for `transit_aspects`. Also accepts a per-class shape, e.g. `{"point": {"square": 2}}`, to move only the `point` class (angles, Part of Fortune, Vertex) without touching `body`. `point` defaults to 3 deg for conjunction/opposition/trine/square and 2 deg for sextile, tighter than `body`'s defaults.
 
 **Returns:**
 - `natal_chart`: Complete birth chart data
@@ -134,14 +134,14 @@ Calculate synastry chart between two people for relationship compatibility analy
 - `person2_house_system` (string, optional): House system code for person 2. Default `P`.
 - `include_minor` (boolean, optional): Include minor aspects. Default `false`.
 - `include_angles` (boolean, optional): Also compute `angle_aspects` (planet-to-angle and angle-to-angle contacts). Default `false`.
-- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees. Also accepts a per-class shape, e.g. `{"point": {"square": 2}}`, to move only the `point` class (angles, Part of Fortune, Vertex) without touching `body`.
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees. Also accepts a per-class shape, e.g. `{"point": {"square": 2}}`, to move only the `point` class (angles, Part of Fortune, Vertex) without touching `body`. `point` defaults to 3 deg for conjunction/opposition/trine/square and 2 deg for sextile, tighter than `body`'s defaults.
 
 **Returns:**
 - `person1_chart`: Complete birth chart for person 1
 - `person2_chart`: Complete birth chart for person 2
 - `synastry_aspects`: Array of planetary aspects between the charts
 - `house_overlay`: `{ person1_planets_in_person2_houses, person2_planets_in_person1_houses }` — for each of the 10 major bodies, which house (1-12) of the other person's chart it falls into
-- `angle_aspects` (only present when `include_angles` is `true`): Array of aspects involving Ascendant/Midheaven/IC/Descendant/Part of Fortune across the two charts, same shape as `synastry_aspects` but with `person1_point`/`person2_point` instead of `_planet`
+- `angle_aspects` (only present when `include_angles` is `true`): Array of aspects involving Ascendant/Midheaven/Part of Fortune across the two charts, same shape as `synastry_aspects` but with `person1_point`/`person2_point` instead of `_planet`. IC and Descendant are not separately aspected — see [Angle Aspects](#angle-aspects) for why, and how to derive their contacts from this array.
 - `calculation_time`: Timestamp of calculation
 
 ### `calculate_aspects`
@@ -153,7 +153,7 @@ Calculate natal chart aspects for a given datetime and coordinates. Returns plan
 - `latitude` (number): Latitude in decimal degrees (-90 to 90)
 - `longitude` (number): Longitude in decimal degrees (-180 to 180)
 - `include_minor` (boolean, optional): Include minor aspects (semisextile, semisquare, sesquiquadrate, quincunx, quintile, biquintile). Default `false`.
-- `include_angles` (boolean, optional): Include chart angles (Ascendant, Midheaven, IC, Descendant, Part of Fortune) in aspect calculations. Default `false`.
+- `include_angles` (boolean, optional): Include chart angles in aspect calculations — Ascendant, Midheaven, and Part of Fortune are aspected; IC and Descendant are computed but never aspected (see [Angle Aspects](#angle-aspects)). Default `false`.
 - `include_south_node` (boolean, optional): Include South Node in aspect calculations. Default `false`.
 - `bodies` (array of strings, optional): Override the default aspect body list. Must be names known to the server.
 - `orb_overrides` (object, optional): Per-aspect orb overrides in degrees, e.g. `{"conjunction": 10}`. Also accepts a per-class shape, e.g. `{"point": {"square": 2}}`, to move only the `point` class (angles, Part of Fortune, Vertex) without touching `body`. `point` defaults to 3 deg for conjunction/opposition/trine/square and 2 deg for sextile, tighter than `body`'s defaults.
@@ -163,6 +163,24 @@ Calculate natal chart aspects for a given datetime and coordinates. Returns plan
 - All fields from `calculate_planetary_positions` (`planets`, `houses`, `chart_points`, `additional_points`, `datetime`, `coordinates`, `house_system`)
 - `aspects`: Array of qualifying aspects, sorted by orb ascending. Each entry has `body_a`, `body_b`, `aspect`, `category` (`major`/`minor`), `aspect_angle`, `separation`, `orb`, `orb_allowed`, and `applying` (`true`/`false`/`null` — `null` when applying/separating cannot be determined, e.g. angle points with no speed, near-stationary bodies, or an exact hit).
 - `settings_used`: The resolved settings (`include_minor_aspects`, `include_angles`, `include_south_node`, `bodies`, `orb_overrides`) actually applied to the calculation.
+
+### Angle Aspects
+
+When `include_angles` is set, only the Ascendant, Midheaven, and Part of Fortune are matched against other bodies for aspects (in `aspects` for `calculate_aspects`, or `angle_aspects` for `calculate_synastry`). The IC and Descendant are still computed and returned as chart points (`chart_points` / `include_angles` positional output), but are excluded from aspect pair-matching.
+
+This is because IC and Descendant are mathematical mirrors of Midheaven and Ascendant — `IC = Midheaven + 180°` and `Descendant = Ascendant + 180°`. Aspecting all four would double-count every axis contact under two labels (e.g. a body square the Ascendant is, by definition, also square the Descendant).
+
+If you need a body's aspect to IC or Descendant, derive it from the returned Midheaven/Ascendant aspect using the 180° shift:
+
+| Aspect to MC / ASC | Aspect to IC / DSC |
+|---|---|
+| Conjunction | Opposition |
+| Opposition | Conjunction |
+| Sextile | Trine |
+| Trine | Sextile |
+| Square | Square (unchanged) |
+
+The orb and applying/separating values carry over unchanged; only the aspect label and its complementary body name change.
 
 ## House Systems
 
