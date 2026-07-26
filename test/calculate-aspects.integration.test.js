@@ -110,21 +110,24 @@ test('reference chart 6: include_angles surfaces Ascendant/MC/PoF aspects, all w
   const withoutAngles = await server.handleToolCall('calculate_aspects', REFERENCE_INPUT);
   const withAngles = await server.handleToolCall('calculate_aspects', { ...REFERENCE_INPUT, include_angles: true });
 
-  const angleNames = ['Ascendant', 'Midheaven', 'IC', 'Descendant', 'Part of Fortune'];
+  const angleNames = ['Ascendant', 'Midheaven', 'Part of Fortune'];
+  const nonAspectableAngleNames = ['IC', 'Descendant'];
   assert.ok(!withoutAngles.aspects.some((a) => angleNames.includes(a.body_a) || angleNames.includes(a.body_b)));
 
   const angleAspects = withAngles.aspects.filter(
     (a) => angleNames.includes(a.body_a) || angleNames.includes(a.body_b)
   );
-  assert.ok(angleAspects.length > 0, 'include_angles: true should add Ascendant/MC/IC/Descendant/PoF aspects');
+  assert.ok(angleAspects.length > 0, 'include_angles: true should add Ascendant/MC/PoF aspects');
   for (const aspect of angleAspects) {
     assert.equal(aspect.applying, null, `${aspect.body_a}-${aspect.body_b} angle aspect must have applying: null (angles have no speed)`);
   }
 
-  const ascDesc = findAspect(withAngles.aspects, 'Ascendant', 'Descendant');
-  assert.ok(ascDesc);
-  assert.equal(ascDesc.aspect, 'opposition');
-  assert.equal(ascDesc.orb, 0);
+  // DSC/IC mirror ASC/MC (DSC=ASC+180, IC=MC+180) - aspecting both ends would double-count
+  // every axis contact, so they never appear in aspects even with include_angles: true.
+  assert.ok(
+    !withAngles.aspects.some((a) => nonAspectableAngleNames.includes(a.body_a) || nonAspectableAngleNames.includes(a.body_b)),
+    'DSC/IC should never appear in aspects - only ASC/MC/PoF are aspectable'
+  );
 });
 
 test('reference chart 7: South Node opt-in mirrors North Node aspects (same orb, opposite body)', { skip: !HAS_SWETEST }, async () => {
@@ -159,6 +162,43 @@ test('orb_overrides tightens qualifying pairs on a real chart', { skip: !HAS_SWE
     orb_overrides: { conjunction: 0.01, opposition: 0.01, trine: 0.01, square: 0.01, sextile: 0.01 },
   });
   assert.ok(tight.aspects.length <= wide.aspects.length);
+});
+
+// SUP-158: orb_overrides also accepts a per-class shape, `{ point: {...} }`, so a caller can
+// tighten/loosen the point class (angles, Part of Fortune, Vertex) without touching body.
+test('orb_overrides per-class shape reaches the point class through the tool boundary', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const wide = await server.handleToolCall('calculate_aspects', { ...REFERENCE_INPUT, include_angles: true });
+  const tight = await server.handleToolCall('calculate_aspects', {
+    ...REFERENCE_INPUT,
+    include_angles: true,
+    orb_overrides: { point: { conjunction: 0.01, opposition: 0.01, trine: 0.01, square: 0.01, sextile: 0.01 } },
+  });
+
+  const angleNames = ['Ascendant', 'Midheaven', 'Part of Fortune'];
+  const isAngleAspect = (a) => angleNames.includes(a.body_a) || angleNames.includes(a.body_b);
+
+  assert.ok(wide.aspects.some((a) => isAngleAspect(a) && a.orb > 0.01), 'sanity: the wide default has an angle aspect a 0.01-deg orb would drop');
+  assert.ok(
+    tight.aspects.filter(isAngleAspect).every((a) => a.orb <= 0.01),
+    'every surviving angle aspect must be within the 0.01-deg point override (e.g. an exact angle-angle square)'
+  );
+  assert.equal(
+    tight.aspects.filter((a) => !isAngleAspect(a)).length,
+    wide.aspects.filter((a) => !isAngleAspect(a)).length,
+    'non-angle (body-class) aspects are unaffected by a point-only override'
+  );
+});
+
+test('orb_overrides rejects an unknown aspect name nested inside a per-class override', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  await assert.rejects(
+    () => server.handleToolCall('calculate_aspects', {
+      ...REFERENCE_INPUT,
+      orb_overrides: { point: { notAnAspect: 1 } },
+    }),
+    /Unknown aspect in orb_overrides/
+  );
 });
 
 test('unknown body in bodies param throws InvalidParams', { skip: !HAS_SWETEST }, async () => {

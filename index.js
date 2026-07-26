@@ -23,13 +23,13 @@ import {
 import {
   DEFAULT_ASPECT_BODIES,
   ANGLE_BODIES,
-  MAJOR_ASPECTS,
-  MINOR_ASPECTS,
+  ASPECTABLE_ANGLES,
   calculateNatalAspects,
   calculateCrossChartAspects,
   calculateHouseOverlay,
   findHouseForLongitude,
   toAspectBody,
+  invalidOrbOverrideKeys,
 } from './lib/aspects.js';
 
 const SYNASTRY_BODIES = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
@@ -152,8 +152,8 @@ class SwissEphemerisServer {
                 },
                 orb_overrides: {
                   type: 'object',
-                  description: 'Per-aspect orb overrides in degrees for transit_aspects, e.g. {"conjunction": 10}.',
-                  additionalProperties: { type: 'number' },
+                  description: 'Per-aspect orb overrides in degrees for transit_aspects, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"point": {"square": 2}} tightens angles/Part of Fortune/Vertex without touching planets.',
+                  additionalProperties: { type: ['number', 'object'] },
                 },
               },
               required: ['birth_datetime', 'latitude', 'longitude'],
@@ -237,8 +237,8 @@ class SwissEphemerisServer {
                 },
                 orb_overrides: {
                   type: 'object',
-                  description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}.',
-                  additionalProperties: { type: 'number' },
+                  description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"point": {"square": 2}} tightens angles/Part of Fortune/Vertex without touching planets.',
+                  additionalProperties: { type: ['number', 'object'] },
                 },
                 person1_house_system: {
                   type: 'string',
@@ -289,8 +289,8 @@ class SwissEphemerisServer {
                 },
                 orb_overrides: {
                   type: 'object',
-                  description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}.',
-                  additionalProperties: { type: 'number' },
+                  description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"point": {"square": 2}} tightens angles/Part of Fortune/Vertex without touching planets.',
+                  additionalProperties: { type: ['number', 'object'] },
                 },
                 house_system: {
                   type: 'string',
@@ -569,7 +569,6 @@ class SwissEphemerisServer {
     } = options;
 
     const knownBodies = new Set([...DEFAULT_ASPECT_BODIES, ...ANGLE_BODIES, 'South Node']);
-    const knownAspectNames = new Set([...Object.keys(MAJOR_ASPECTS), ...Object.keys(MINOR_ASPECTS)]);
 
     const requestedBodies = Array.isArray(bodies) && bodies.length ? bodies : DEFAULT_ASPECT_BODIES;
 
@@ -579,15 +578,15 @@ class SwissEphemerisServer {
       }
     }
 
-    for (const key of Object.keys(orbOverrides)) {
-      if (!knownAspectNames.has(key)) {
-        throw new McpError(ErrorCode.InvalidParams, `Unknown aspect in orb_overrides: ${key}`);
-      }
+    const invalidOrbKeys = invalidOrbOverrideKeys(orbOverrides);
+    if (invalidOrbKeys.length) {
+      throw new McpError(ErrorCode.InvalidParams, `Unknown aspect in orb_overrides: ${invalidOrbKeys[0]}`);
     }
 
     const bodySet = new Set(requestedBodies);
     if (includeAngles) {
-      ANGLE_BODIES.forEach((b) => bodySet.add(b));
+      // DSC/IC are mirrors of ASC/MC and are never aspected - see ASPECTABLE_ANGLES.
+      ASPECTABLE_ANGLES.forEach((b) => bodySet.add(b));
     }
     if (includeSouthNode) {
       bodySet.add('South Node');
@@ -702,15 +701,17 @@ class SwissEphemerisServer {
     }));
   }
 
-  // Cross-chart aspects involving ANGLE_BODIES (Ascendant/Midheaven/IC/Descendant/Part of Fortune):
+  // Cross-chart aspects involving ASPECTABLE_ANGLES (Ascendant/Midheaven/Part of Fortune):
   // person1 planets -> person2 angles, person2 planets -> person1 angles, and angle-to-angle.
+  // DSC/IC are excluded here - they mirror ASC/MC, so aspecting them would double-count
+  // every axis contact under two labels. They remain available as computed chart points.
   calculateSynastryAngleAspects(person1Chart, person2Chart, options = {}) {
     const toBodies = (chart, names) => names
       .map((name) => toAspectBody(chart, name))
       .filter(Boolean);
 
     const toPlanetBodies = (chart) => toBodies(chart, SYNASTRY_BODIES);
-    const toAngleBodies = (chart) => toBodies(chart, ANGLE_BODIES);
+    const toAngleBodies = (chart) => toBodies(chart, ASPECTABLE_ANGLES);
 
     const person1Planets = toPlanetBodies(person1Chart);
     const person2Planets = toPlanetBodies(person2Chart);
@@ -928,11 +929,9 @@ class SwissEphemerisServer {
         }
 
         if (synastry_orb_overrides !== undefined) {
-          const knownSynastryAspectNames = new Set([...Object.keys(MAJOR_ASPECTS), ...Object.keys(MINOR_ASPECTS)]);
-          for (const key of Object.keys(synastry_orb_overrides)) {
-            if (!knownSynastryAspectNames.has(key)) {
-              throw new McpError(ErrorCode.InvalidParams, `Unknown aspect in orb_overrides: ${key}`);
-            }
+          const invalidSynastryOrbKeys = invalidOrbOverrideKeys(synastry_orb_overrides);
+          if (invalidSynastryOrbKeys.length) {
+            throw new McpError(ErrorCode.InvalidParams, `Unknown aspect in orb_overrides: ${invalidSynastryOrbKeys[0]}`);
           }
         }
 
