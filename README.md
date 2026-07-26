@@ -90,7 +90,7 @@ Calculate birth chart positions and current transits for comparison, including a
 - `include_angles` (boolean, optional): Include chart angles in `transit_aspects`. Default `false`.
 - `include_south_node` (boolean, optional): Include South Node in `transit_aspects`. Default `false`.
 - `bodies` (array of strings, optional): Override the default body list for `transit_aspects`.
-- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees for `transit_aspects`.
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees for `transit_aspects`. Also accepts a per-class shape, e.g. `{"point": {"square": 2}}`, to move only the `point` class (angles, Part of Fortune, Vertex) without touching `body`.
 
 **Returns:**
 - `natal_chart`: Complete birth chart data
@@ -134,7 +134,7 @@ Calculate synastry chart between two people for relationship compatibility analy
 - `person2_house_system` (string, optional): House system code for person 2. Default `P`.
 - `include_minor` (boolean, optional): Include minor aspects. Default `false`.
 - `include_angles` (boolean, optional): Also compute `angle_aspects` (planet-to-angle and angle-to-angle contacts). Default `false`.
-- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees.
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees. Also accepts a per-class shape, e.g. `{"point": {"square": 2}}`, to move only the `point` class (angles, Part of Fortune, Vertex) without touching `body`.
 
 **Returns:**
 - `person1_chart`: Complete birth chart for person 1
@@ -156,7 +156,7 @@ Calculate natal chart aspects for a given datetime and coordinates. Returns plan
 - `include_angles` (boolean, optional): Include chart angles (Ascendant, Midheaven, IC, Descendant, Part of Fortune) in aspect calculations. Default `false`.
 - `include_south_node` (boolean, optional): Include South Node in aspect calculations. Default `false`.
 - `bodies` (array of strings, optional): Override the default aspect body list. Must be names known to the server.
-- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees, e.g. `{"conjunction": 10}`.
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees, e.g. `{"conjunction": 10}`. Also accepts a per-class shape, e.g. `{"point": {"square": 2}}`, to move only the `point` class (angles, Part of Fortune, Vertex) without touching `body`. `point` defaults to 3 deg for conjunction/opposition/trine/square and 2 deg for sextile, tighter than `body`'s defaults.
 - `house_system` (string, optional): House system code. Default `P`. See [House Systems](#house-systems).
 
 **Returns:**

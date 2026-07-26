@@ -161,6 +161,43 @@ test('orb_overrides tightens qualifying pairs on a real chart', { skip: !HAS_SWE
   assert.ok(tight.aspects.length <= wide.aspects.length);
 });
 
+// SUP-158: orb_overrides also accepts a per-class shape, `{ point: {...} }`, so a caller can
+// tighten/loosen the point class (angles, Part of Fortune, Vertex) without touching body.
+test('orb_overrides per-class shape reaches the point class through the tool boundary', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const wide = await server.handleToolCall('calculate_aspects', { ...REFERENCE_INPUT, include_angles: true });
+  const tight = await server.handleToolCall('calculate_aspects', {
+    ...REFERENCE_INPUT,
+    include_angles: true,
+    orb_overrides: { point: { conjunction: 0.01, opposition: 0.01, trine: 0.01, square: 0.01, sextile: 0.01 } },
+  });
+
+  const angleNames = ['Ascendant', 'Midheaven', 'IC', 'Descendant', 'Part of Fortune'];
+  const isAngleAspect = (a) => angleNames.includes(a.body_a) || angleNames.includes(a.body_b);
+
+  assert.ok(wide.aspects.some((a) => isAngleAspect(a) && a.orb > 0.01), 'sanity: the wide default has an angle aspect a 0.01-deg orb would drop');
+  assert.ok(
+    tight.aspects.filter(isAngleAspect).every((a) => a.orb <= 0.01),
+    'every surviving angle aspect must be within the 0.01-deg point override (e.g. an exact angle-angle square)'
+  );
+  assert.equal(
+    tight.aspects.filter((a) => !isAngleAspect(a)).length,
+    wide.aspects.filter((a) => !isAngleAspect(a)).length,
+    'non-angle (body-class) aspects are unaffected by a point-only override'
+  );
+});
+
+test('orb_overrides rejects an unknown aspect name nested inside a per-class override', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  await assert.rejects(
+    () => server.handleToolCall('calculate_aspects', {
+      ...REFERENCE_INPUT,
+      orb_overrides: { point: { notAnAspect: 1 } },
+    }),
+    /Unknown aspect in orb_overrides/
+  );
+});
+
 test('unknown body in bodies param throws InvalidParams', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
   await assert.rejects(
