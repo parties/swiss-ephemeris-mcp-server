@@ -25,3 +25,21 @@ implied by this entry.)
   `include_angles` positional output) — they are just never aspected. See
   [Angle Aspects](README.md#angle-aspects) in `README.md` for the derivation mapping (conjunction
   ↔ opposition, sextile ↔ trine, square stays square) if you need a body's IC/Descendant aspect.
+
+- **2026-07-26 — `point` orb class split into `angle` and `derived` (corrects the same-day
+  point-class entry above, SUP-168).** The single `point` orb class combined two categories with
+  opposite orb rationales and, combined with the single-axis angle aspecting above, made
+  IC/DSC-derivable contacts lossy: `point` sextile (2°) ≠ trine (3°), so a body 2.5° off a
+  sextile-to-Ascendant was dropped even though the identical contact as a trine-to-Descendant
+  (3°) would have qualified before DSC was excluded from aspecting. `point` also let minors
+  (quincunx 3°) outrank majors (sextile 2°) on the same point. `point` is now two classes:
+  `angle` (Ascendant, Midheaven, IC, Descendant — 5°/4°/3°/1.5°/1.5°/1° for
+  conjunction-opposition/square/trine-sextile/semisextile-quincunx/semisquare-sesquiquadrate/
+  quintile-biquintile, mirror-symmetric by construction and enforced by a unit test) and
+  `derived` (Part of Fortune, Vertex — 3°/2°/2°/1° for conjunction-opposition/square/
+  trine-sextile/all minors). Minors were swept down with majors in both classes to restore
+  major-wider-than-minor ordering everywhere. **`orb_overrides.point` no longer exists — callers
+  must use `orb_overrides.angle` and/or `orb_overrides.derived`.** This is the third breaking
+  change to these defaults (after the two entries above) and is caller-visible. See
+  [Angle Aspects](README.md#angle-aspects) and the per-tool `orb_overrides` docs in `README.md`,
+  and `docs/decisions/SUP-156-angle-aspect-noise.md` for the full defect writeup.

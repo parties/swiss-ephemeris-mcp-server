@@ -152,7 +152,7 @@ class SwissEphemerisServer {
                 },
                 orb_overrides: {
                   type: 'object',
-                  description: 'Per-aspect orb overrides in degrees for transit_aspects, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"point": {"square": 2}} tightens angles/Part of Fortune/Vertex without touching planets.',
+                  description: 'Per-aspect orb overrides in degrees for transit_aspects, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"angle": {"square": 4}} or {"derived": {"square": 2}} tightens the angle (Ascendant/Midheaven/IC/Descendant) or derived (Part of Fortune/Vertex) class without touching planets.',
                   additionalProperties: { type: ['number', 'object'] },
                 },
               },
@@ -237,7 +237,7 @@ class SwissEphemerisServer {
                 },
                 orb_overrides: {
                   type: 'object',
-                  description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"point": {"square": 2}} tightens angles/Part of Fortune/Vertex without touching planets.',
+                  description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"angle": {"square": 4}} or {"derived": {"square": 2}} tightens the angle (Ascendant/Midheaven/IC/Descendant) or derived (Part of Fortune/Vertex) class without touching planets.',
                   additionalProperties: { type: ['number', 'object'] },
                 },
                 person1_house_system: {
@@ -289,7 +289,7 @@ class SwissEphemerisServer {
                 },
                 orb_overrides: {
                   type: 'object',
-                  description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"point": {"square": 2}} tightens angles/Part of Fortune/Vertex without touching planets.',
+                  description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"angle": {"square": 4}} or {"derived": {"square": 2}} tightens the angle (Ascendant/Midheaven/IC/Descendant) or derived (Part of Fortune/Vertex) class without touching planets.',
                   additionalProperties: { type: ['number', 'object'] },
                 },
                 house_system: {

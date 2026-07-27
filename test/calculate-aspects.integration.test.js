@@ -164,15 +164,18 @@ test('orb_overrides tightens qualifying pairs on a real chart', { skip: !HAS_SWE
   assert.ok(tight.aspects.length <= wide.aspects.length);
 });
 
-// SUP-158: orb_overrides also accepts a per-class shape, `{ point: {...} }`, so a caller can
-// tighten/loosen the point class (angles, Part of Fortune, Vertex) without touching body.
-test('orb_overrides per-class shape reaches the point class through the tool boundary', { skip: !HAS_SWETEST }, async () => {
+// SUP-168: orb_overrides also accepts a per-class shape, `{ angle: {...}, derived: {...} }`,
+// so a caller can tighten/loosen the angle (ASC/MC/IC/DSC) or derived (Part of Fortune, Vertex)
+// class without touching body. `point` split into these two classes; both must be overridden
+// to reach every angle-family body.
+test('orb_overrides per-class shape reaches the angle and derived classes through the tool boundary', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
   const wide = await server.handleToolCall('calculate_aspects', { ...REFERENCE_INPUT, include_angles: true });
+  const tightOverride = { conjunction: 0.01, opposition: 0.01, trine: 0.01, square: 0.01, sextile: 0.01 };
   const tight = await server.handleToolCall('calculate_aspects', {
     ...REFERENCE_INPUT,
     include_angles: true,
-    orb_overrides: { point: { conjunction: 0.01, opposition: 0.01, trine: 0.01, square: 0.01, sextile: 0.01 } },
+    orb_overrides: { angle: tightOverride, derived: tightOverride },
   });
 
   const angleNames = ['Ascendant', 'Midheaven', 'Part of Fortune'];
@@ -181,12 +184,12 @@ test('orb_overrides per-class shape reaches the point class through the tool bou
   assert.ok(wide.aspects.some((a) => isAngleAspect(a) && a.orb > 0.01), 'sanity: the wide default has an angle aspect a 0.01-deg orb would drop');
   assert.ok(
     tight.aspects.filter(isAngleAspect).every((a) => a.orb <= 0.01),
-    'every surviving angle aspect must be within the 0.01-deg point override (e.g. an exact angle-angle square)'
+    'every surviving angle aspect must be within the 0.01-deg angle/derived override (e.g. an exact angle-angle square)'
   );
   assert.equal(
     tight.aspects.filter((a) => !isAngleAspect(a)).length,
     wide.aspects.filter((a) => !isAngleAspect(a)).length,
-    'non-angle (body-class) aspects are unaffected by a point-only override'
+    'non-angle (body-class) aspects are unaffected by an angle/derived-only override'
   );
 });
 
@@ -195,7 +198,7 @@ test('orb_overrides rejects an unknown aspect name nested inside a per-class ove
   await assert.rejects(
     () => server.handleToolCall('calculate_aspects', {
       ...REFERENCE_INPUT,
-      orb_overrides: { point: { notAnAspect: 1 } },
+      orb_overrides: { angle: { notAnAspect: 1 } },
     }),
     /Unknown aspect in orb_overrides/
   );

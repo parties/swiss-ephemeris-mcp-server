@@ -7,6 +7,8 @@ import {
   DEFAULT_ORBS,
   ORB_CLASSES,
   BODY_ORB_CLASS,
+  MAJOR_ASPECTS,
+  MINOR_ASPECTS,
   normalizeSeparation,
   computeApplying,
   calculateNatalAspects,
@@ -217,35 +219,61 @@ test('calculateNatalAspects never aspects DSC/IC even when explicitly present in
   );
 });
 
-// SUP-158: `point` gets its own, tighter numbers - 3 deg for the majors, 2 deg for sextile.
-// Minor-aspect orbs are unspecified by the ticket, so `point` keeps the `body` minor values.
-test('ORB_CLASSES.point is tighter than body for majors/sextile, same for minors', () => {
+// SUP-168: `point` split into `angle` (ASC/MC/IC/DSC - 5/4/3/1.5/1.5/1) and `derived`
+// (Part of Fortune/Vertex - 3/2/2/1). `angle` is wider than the old `point` class because
+// ASC/MC sensitivity is birth-time-error propagation, not aspect strength; `derived` stays
+// tight because it compounds derivation from other points.
+test('ORB_CLASSES.angle and ORB_CLASSES.derived match the split tables; body is unchanged', () => {
   assert.deepEqual(ORB_CLASSES.body, DEFAULT_ORBS);
-  assert.deepEqual(ORB_CLASSES.point, {
-    ...DEFAULT_ORBS,
-    conjunction: 3,
-    opposition: 3,
-    trine: 3,
-    square: 3,
-    sextile: 2,
+  assert.deepEqual(ORB_CLASSES.angle, {
+    conjunction: 5, opposition: 5,
+    square: 4,
+    trine: 3, sextile: 3,
+    semisextile: 1.5, quincunx: 1.5,
+    semisquare: 1.5, sesquiquadrate: 1.5,
+    quintile: 1, biquintile: 1,
+  });
+  assert.deepEqual(ORB_CLASSES.derived, {
+    conjunction: 3, opposition: 3,
+    square: 2,
+    trine: 2, sextile: 2,
+    semisextile: 1, semisquare: 1, sesquiquadrate: 1, quincunx: 1, quintile: 1, biquintile: 1,
   });
 });
 
-test('BODY_ORB_CLASS maps every angle body (including Part of Fortune) and Vertex to the point class', () => {
-  for (const name of ANGLE_BODIES) {
-    assert.equal(BODY_ORB_CLASS[name], 'point');
+test('BODY_ORB_CLASS maps ASC/MC/IC/DSC to angle and Part of Fortune/Vertex to derived', () => {
+  for (const name of ['Ascendant', 'Midheaven', 'IC', 'Descendant']) {
+    assert.equal(BODY_ORB_CLASS[name], 'angle');
   }
-  assert.equal(BODY_ORB_CLASS.Vertex, 'point');
+  assert.equal(BODY_ORB_CLASS['Part of Fortune'], 'derived');
+  assert.equal(BODY_ORB_CLASS.Vertex, 'derived');
 });
 
-test('calculateNatalAspects: a point-class pair is held to the tighter point orb even though a same-separation body pair still matches', () => {
+test('angle orb class is mirror-symmetric (precondition for lossless IC/DSC derivation)', () => {
+  const a = ORB_CLASSES.angle;
+  assert.equal(a.conjunction, a.opposition);
+  assert.equal(a.sextile, a.trine);
+  assert.equal(a.semisextile, a.quincunx);
+  assert.equal(a.semisquare, a.sesquiquadrate);
+  // square self-mirrors; quintile/biquintile have no mirror partner (intentionally unconstrained)
+});
+
+test('every orb class ranks all majors wider than all minors', () => {
+  for (const [name, orbs] of Object.entries(ORB_CLASSES)) {
+    const majors = Object.keys(MAJOR_ASPECTS).map((k) => orbs[k]);
+    const minors = Object.keys(MINOR_ASPECTS).map((k) => orbs[k]);
+    assert.ok(Math.max(...minors) < Math.min(...majors), `${name}: max minor must be < min major`);
+  }
+});
+
+test('calculateNatalAspects: an angle/derived pair is held to the tighter side even though a same-separation body pair still matches', () => {
   const bodyPair = [
     { name: 'Sun', longitude: 0, speed: 1 },
     { name: 'Moon', longitude: 95, speed: 13 }, // 95 deg -> square, orb 5 (within body's 8)
   ];
   const pointPair = [
-    { name: 'Ascendant', longitude: 0, speed: null },
-    { name: 'Part of Fortune', longitude: 95, speed: null }, // same 5-deg orb, exceeds point's 3
+    { name: 'Ascendant', longitude: 0, speed: null }, // angle square = 4
+    { name: 'Part of Fortune', longitude: 95, speed: null }, // derived square = 2; min(4,2)=2, orb 5 exceeds
   ];
 
   const [bodyAspect] = calculateNatalAspects(bodyPair, { includeAngles: true });
@@ -255,62 +283,62 @@ test('calculateNatalAspects: a point-class pair is held to the tighter point orb
   assert.equal(calculateNatalAspects(pointPair, { includeAngles: true }).length, 0);
 });
 
-test('calculateNatalAspects: a point-class pair within the tighter 3-deg orb still matches', () => {
+test('calculateNatalAspects: an angle/derived pair within the tighter derived orb still matches', () => {
   const pointPair = [
-    { name: 'Ascendant', longitude: 0, speed: null },
-    { name: 'Part of Fortune', longitude: 92, speed: null }, // square, orb 2 - within point's 3
+    { name: 'Ascendant', longitude: 0, speed: null }, // angle square = 4
+    { name: 'Part of Fortune', longitude: 92, speed: null }, // square, orb 2 - within derived's 2
   ];
   const [pointAspect] = calculateNatalAspects(pointPair, { includeAngles: true });
   assert.equal(pointAspect.aspect, 'square');
-  assert.equal(pointAspect.orb_allowed, 3);
+  assert.equal(pointAspect.orb_allowed, 2);
 });
 
-test('a pair spanning body and point classes is held to the stricter (point) orb', () => {
+test('a pair spanning body and derived classes is held to the stricter (derived) orb', () => {
   const mixedPair = [
-    { name: 'Pluto', longitude: 0, speed: 0 },
-    { name: 'Part of Fortune', longitude: 93, speed: null }, // square, orb 3 - fails point's 3? exactly at boundary
+    { name: 'Pluto', longitude: 0, speed: 0 }, // body square = 8
+    { name: 'Part of Fortune', longitude: 92, speed: null }, // derived square = 2, orb 2 - exactly at boundary
   ];
   const [aspect] = calculateNatalAspects(mixedPair, { includeAngles: true });
-  assert.equal(aspect.orb_allowed, 3);
+  assert.equal(aspect.orb_allowed, 2);
 
   const justOutside = calculateNatalAspects(
     [
       { name: 'Pluto', longitude: 0, speed: 0 },
-      { name: 'Part of Fortune', longitude: 93.01, speed: null },
+      { name: 'Part of Fortune', longitude: 92.01, speed: null },
     ],
     { includeAngles: true }
   );
-  assert.equal(justOutside.length, 0, 'a body-class partner cannot widen a point-class orb past 3 deg');
+  assert.equal(justOutside.length, 0, 'a body-class partner cannot widen a derived-class orb past 2 deg');
 });
 
-test('orb_overrides per-class shape tightens point without touching body', () => {
+test('orb_overrides per-class shape tightens derived without touching body', () => {
   const bodyPair = [
     { name: 'A', longitude: 0, speed: 0 },
-    { name: 'B', longitude: 91.5, speed: 0 }, // square, orb 1.5 - within both defaults
+    { name: 'B', longitude: 91.5, speed: 0 }, // square, orb 1.5 - within body's default (8)
   ];
   const pointPair = [
-    { name: 'Ascendant', longitude: 0, speed: null },
-    { name: 'Part of Fortune', longitude: 91.5, speed: null },
+    { name: 'Ascendant', longitude: 0, speed: null }, // angle square = 4, untouched
+    { name: 'Part of Fortune', longitude: 91.5, speed: null }, // derived square overridden to 1
   ];
-  const opts = { orbOverrides: { point: { square: 1 } }, includeAngles: true };
+  const opts = { orbOverrides: { derived: { square: 1 } }, includeAngles: true };
 
-  assert.ok(calculateNatalAspects(bodyPair, opts).some((a) => a.aspect === 'square'), 'body class is unaffected by a point-only override');
-  assert.ok(!calculateNatalAspects(pointPair, opts).some((a) => a.aspect === 'square'), 'point class picks up its own override');
+  assert.ok(calculateNatalAspects(bodyPair, opts).some((a) => a.aspect === 'square'), 'body class is unaffected by a derived-only override');
+  assert.ok(!calculateNatalAspects(pointPair, opts).some((a) => a.aspect === 'square'), 'derived class picks up its own override, tightening the min below 1.5');
 });
 
-test('orb_overrides per-class shape loosens point without touching body', () => {
+test('orb_overrides per-class shape loosens derived without touching body', () => {
   const bodyPair = [
     { name: 'A', longitude: 0, speed: 0 },
-    { name: 'B', longitude: 94, speed: 0 }, // square, orb 4 - exceeds default body of... within body's 8, but beyond point's default 3
+    { name: 'B', longitude: 94, speed: 0 }, // square, orb 4 - within body's default (8)
   ];
   const pointPair = [
-    { name: 'Ascendant', longitude: 0, speed: null },
-    { name: 'Part of Fortune', longitude: 94, speed: null },
+    { name: 'Ascendant', longitude: 0, speed: null }, // angle square = 4
+    { name: 'Part of Fortune', longitude: 94, speed: null }, // derived square default = 2
   ];
-  const opts = { orbOverrides: { point: { square: 5 } }, includeAngles: true };
+  const opts = { orbOverrides: { derived: { square: 5 } }, includeAngles: true };
 
-  assert.ok(!calculateNatalAspects(pointPair, { includeAngles: true }).some((a) => a.aspect === 'square'), 'sanity: 4-deg orb exceeds point default of 3');
-  assert.ok(calculateNatalAspects(pointPair, opts).some((a) => a.aspect === 'square'), 'point class picks up the loosened override');
+  assert.ok(!calculateNatalAspects(pointPair, { includeAngles: true }).some((a) => a.aspect === 'square'), 'sanity: 4-deg orb exceeds min(angle 4, derived 2) = 2');
+  assert.ok(calculateNatalAspects(pointPair, opts).some((a) => a.aspect === 'square'), 'derived class picks up the loosened override, raising the min to angle\'s 4');
   assert.ok(calculateNatalAspects(bodyPair, opts).some((a) => a.aspect === 'square'), 'body class still matches its own (untouched) default');
 });
 
