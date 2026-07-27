@@ -12,7 +12,8 @@
     "start:http": "MCP_HTTP_MODE=true node index.js",
     "dev": "node --watch index.js",
     "dev:http": "MCP_HTTP_MODE=true node --watch index.js",
-    "test": "node --test"
+    "test": "node --test",
+    "prepare": "husky"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.13.0",
@@ -55,5 +56,10 @@
     "README.md",
     "LICENSE",
     "vendor/"
-  ]
-} 
+  ],
+  "devDependencies": {
+    "@commitlint/cli": "^21.2.1",
+    "@commitlint/config-conventional": "^21.2.0",
+    "husky": "^9.1.7"
+  }
+}
