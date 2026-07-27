@@ -213,6 +213,8 @@ Commit messages are linted against [Conventional Commits](https://www.convention
 
 For WIP or otherwise non-conforming commits, bypass the hook with `git commit --no-verify`.
 
+PR titles are also checked in CI against Conventional Commits (`.github/workflows/pr-title-lint.yml`, via `amannn/action-semantic-pull-request`), since this repo squash-merges with the PR title as the resulting commit message — a non-conforming title will fail the check even if the individual commits are fine.
+
 ## Docker
 
 ```bash
