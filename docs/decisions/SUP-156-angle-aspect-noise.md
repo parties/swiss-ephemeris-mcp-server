@@ -135,3 +135,23 @@ same-axis reporting, not a different astrological convention.
 - History: commits `0a3526c`, `c5463af`, `5402e87`, `3bc2f0d`, merged as PR #17
   (`fix: tighter point-class orbs and single-axis angle aspecting (SUP-156)`); the axis-mirror
   exclusion was tracked as a follow-on ticket, SUP-159.
+
+## Amendment (2026-07-26, SUP-168)
+
+The "exact, not approximate" / "losslessly recoverable" claim in Decision 2 above (lines 103–106)
+is conditional, not unconditional: it holds only if the orb table governing ASC/MC/IC/DSC is
+symmetric under the 180° mapping (mirror-pair orbs equal). The `point` class introduced by
+Decision 1 was **not** symmetric — trine (3°) ≠ sextile (2°), and quincunx (3°) ≠ semisextile
+(2°) — so a contact that qualified as a trine to DSC (3° orb) could silently vanish as the
+equivalent sextile to ASC (2° orb) once DSC was excluded from aspecting. This was filed as
+SUP-168 (Defect A) and fixed by splitting `point` into an `angle` class (ASC/MC/IC/DSC, orbs
+5/4/3/1.5/1.5/1, mirror-symmetric by construction) and a `derived` class (Part of
+Fortune/Vertex, orbs 3/2/2/1). Mirror-pair equality for `angle` is now a structural invariant
+enforced by a unit test (`test/aspects.test.js`), not an incidental property of chosen numbers.
+
+One irreducible gap remains even under the corrected table: quintile (72°) and biquintile
+(144°) have no mirror partner at all — 180° − 72° = 108° and 180° − 144° = 36° are not aspect
+angles in this system — so a body's IC/Descendant contact reachable only via a quintile or
+biquintile to MC/Ascendant is not derivable from the returned aspect array by any orb-table
+fix. This is a geometric fact about which angles pair under a 180° shift, not a defect. See
+[Angle Aspects](../../README.md#angle-aspects) for the current derivation table.

@@ -90,7 +90,7 @@ Calculate birth chart positions and current transits for comparison, including a
 - `include_angles` (boolean, optional): Include chart angles in `transit_aspects`. Default `false`.
 - `include_south_node` (boolean, optional): Include South Node in `transit_aspects`. Default `false`.
 - `bodies` (array of strings, optional): Override the default body list for `transit_aspects`.
-- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees for `transit_aspects`. Also accepts a per-class shape, e.g. `{"point": {"square": 2}}`, to move only the `point` class (angles, Part of Fortune, Vertex) without touching `body`. `point` defaults to 3 deg for conjunction/opposition/trine/square and 2 deg for sextile, tighter than `body`'s defaults.
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees for `transit_aspects`. Also accepts a per-class shape, e.g. `{"angle": {"square": 4}}` or `{"derived": {"square": 2}}`, to move only the `angle` class (Ascendant/Midheaven/IC/Descendant) or `derived` class (Part of Fortune, Vertex) without touching `body`. `angle` defaults to 5/4/3/1.5/1.5/1 deg (conjunction-opposition/square/trine-sextile/semisextile-quincunx/semisquare-sesquiquadrate/quintile-biquintile); `derived` defaults to 3/2/2/1 deg (conjunction-opposition/square/trine-sextile/all minors) — both tighter than `body`'s defaults.
 
 **Returns:**
 - `natal_chart`: Complete birth chart data
@@ -134,7 +134,7 @@ Calculate synastry chart between two people for relationship compatibility analy
 - `person2_house_system` (string, optional): House system code for person 2. Default `P`.
 - `include_minor` (boolean, optional): Include minor aspects. Default `false`.
 - `include_angles` (boolean, optional): Also compute `angle_aspects` (planet-to-angle and angle-to-angle contacts). Default `false`.
-- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees. Also accepts a per-class shape, e.g. `{"point": {"square": 2}}`, to move only the `point` class (angles, Part of Fortune, Vertex) without touching `body`. `point` defaults to 3 deg for conjunction/opposition/trine/square and 2 deg for sextile, tighter than `body`'s defaults.
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees. Also accepts a per-class shape, e.g. `{"angle": {"square": 4}}` or `{"derived": {"square": 2}}`, to move only the `angle` class (Ascendant/Midheaven/IC/Descendant) or `derived` class (Part of Fortune, Vertex) without touching `body`. `angle` defaults to 5/4/3/1.5/1.5/1 deg (conjunction-opposition/square/trine-sextile/semisextile-quincunx/semisquare-sesquiquadrate/quintile-biquintile); `derived` defaults to 3/2/2/1 deg (conjunction-opposition/square/trine-sextile/all minors) — both tighter than `body`'s defaults.
 
 **Returns:**
 - `person1_chart`: Complete birth chart for person 1
@@ -156,7 +156,7 @@ Calculate natal chart aspects for a given datetime and coordinates. Returns plan
 - `include_angles` (boolean, optional): Include chart angles in aspect calculations — Ascendant, Midheaven, and Part of Fortune are aspected; IC and Descendant are computed but never aspected (see [Angle Aspects](#angle-aspects)). Default `false`.
 - `include_south_node` (boolean, optional): Include South Node in aspect calculations. Default `false`.
 - `bodies` (array of strings, optional): Override the default aspect body list. Must be names known to the server.
-- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees, e.g. `{"conjunction": 10}`. Also accepts a per-class shape, e.g. `{"point": {"square": 2}}`, to move only the `point` class (angles, Part of Fortune, Vertex) without touching `body`. `point` defaults to 3 deg for conjunction/opposition/trine/square and 2 deg for sextile, tighter than `body`'s defaults.
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees, e.g. `{"conjunction": 10}`. Also accepts a per-class shape, e.g. `{"angle": {"square": 4}}` or `{"derived": {"square": 2}}`, to move only the `angle` class (Ascendant/Midheaven/IC/Descendant) or `derived` class (Part of Fortune, Vertex) without touching `body`. `angle` defaults to 5/4/3/1.5/1.5/1 deg (conjunction-opposition/square/trine-sextile/semisextile-quincunx/semisquare-sesquiquadrate/quintile-biquintile); `derived` defaults to 3/2/2/1 deg (conjunction-opposition/square/trine-sextile/all minors) — both tighter than `body`'s defaults.
 - `house_system` (string, optional): House system code. Default `P`. See [House Systems](#house-systems).
 
 **Returns:**
@@ -179,8 +179,14 @@ If you need a body's aspect to IC or Descendant, derive it from the returned Mid
 | Sextile | Trine |
 | Trine | Sextile |
 | Square | Square (unchanged) |
+| Semisextile | Quincunx |
+| Quincunx | Semisextile |
+| Semisquare | Sesquiquadrate |
+| Sesquiquadrate | Semisquare |
+| Quintile | **not derivable** — no mirror partner (180° − 72° = 108° is not an aspect) |
+| Biquintile | **not derivable** — no mirror partner (180° − 144° = 36° is not an aspect) |
 
-The orb and applying/separating values carry over unchanged; only the aspect label and its complementary body name change.
+The orb and applying/separating values carry over unchanged; only the aspect label and its complementary body name change. This is lossless **because** the `angle` orb class (which governs ASC/MC/IC/DSC) is mirror-symmetric by construction — every mirror pair (conjunction/opposition, sextile/trine, semisextile/quincunx, semisquare/sesquiquadrate) carries an equal orb, enforced by a unit test. A body's IC or Descendant contact reached only via a quintile or biquintile to MC/ASC has no mirror partner and is simply absent from the derivation — there is no way to recover it from the returned aspect array.
 
 ## House Systems
 

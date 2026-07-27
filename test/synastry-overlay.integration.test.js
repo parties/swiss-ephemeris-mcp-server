@@ -93,7 +93,7 @@ test('calculate_synastry include_angles aspects Part of Fortune', { skip: !HAS_S
   assert.ok(fortuneRows.some((a) => a.person1_point === 'Part of Fortune'), 'expect person1 Fortune contacts');
   assert.ok(fortuneRows.some((a) => a.person2_point === 'Part of Fortune'), 'expect person2 Fortune contacts');
 
-  // P1 Fortune sextile P2 Neptune — 0.88° orb, well inside the point class's 2-deg sextile.
+  // P1 Fortune sextile P2 Neptune — 0.88° orb, well inside the derived class's 2-deg sextile.
   const neptuneSextile = fortuneRows.find(
     (a) => a.person1_point === 'Neptune' && a.person2_point === 'Part of Fortune' && a.aspect === 'sextile'
   );
@@ -101,11 +101,13 @@ test('calculate_synastry include_angles aspects Part of Fortune', { skip: !HAS_S
   assert.equal(neptuneSextile.orb, '0.88');
 });
 
-// SUP-158: Part of Fortune, the angles, and Vertex belong to the `point` orb class - 3 deg
-// major/opposition/trine/square, 2 deg sextile - tighter than a swetest body's defaults.
-// A body-class partner can never widen that orb: the pair is held to whichever side is
-// stricter. This is the exact fixture pair from SUP-156 that motivated the tighter class.
-test('calculate_synastry include_angles: point-class orb drops wide Fortune contacts and keeps tight ones', { skip: !HAS_SWETEST }, async () => {
+// SUP-168: Part of Fortune and Vertex belong to the `derived` orb class - 3 deg conjunction/
+// opposition, 2 deg square/trine/sextile - tighter than a swetest body's defaults and tighter
+// than the `angle` class (ASC/MC/IC/DSC). A body-class partner can never widen that orb: the
+// pair is held to whichever side is stricter. This is the exact fixture pair from SUP-156 that
+// motivated the tighter class; the 2.38-deg Fortune-Mars square is the SUP-168 boundary delta -
+// it survived under the old point class's 3-deg square but now drops under derived's 2-deg.
+test('calculate_synastry include_angles: derived-class orb drops wide Fortune contacts and keeps tight ones', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
   const result = await server.handleToolCall('calculate_synastry', {
     person1_datetime: DAY_CHART.datetime,
@@ -121,31 +123,42 @@ test('calculate_synastry include_angles: point-class orb drops wide Fortune cont
     (a) => a.person1_point === 'Part of Fortune' || a.person2_point === 'Part of Fortune'
   );
 
-  // Sub-3-deg Fortune contacts survive at the point class's default.
+  // Sub-2-deg Fortune contacts survive at the derived class's default.
   assert.ok(
-    fortuneRows.some((a) => a.person1_point === 'Part of Fortune' && a.person2_point === 'Mars' && a.aspect === 'square' && a.orb === '2.38'),
-    'P1 Fortune square P2 Mars (2.38 deg) should survive'
+    fortuneRows.some((a) => a.person1_point === 'Part of Fortune' && a.person2_point === 'Moon' && a.aspect === 'square' && a.orb === '1.58'),
+    'P1 Fortune square P2 Moon (1.58 deg) should survive'
   );
-  // P1 IC trine P2 Fortune (2.92 deg) is NOT in this list - IC mirrors MC and is never
-  // aspected (SUP-159), even though it would otherwise fall inside the point-class orb.
+  assert.ok(
+    fortuneRows.some((a) => a.person1_point === 'Part of Fortune' && a.person2_point === 'Mercury' && a.aspect === 'conjunction' && a.orb === '2.69'),
+    'P1 Fortune conjunction P2 Mercury (2.69 deg) is within derived conjunction 3-deg and should survive'
+  );
+
+  // P1 Fortune square P2 Mars (2.38 deg) survived under the old point class's 3-deg square but
+  // now exceeds derived's 2-deg square - the exact SUP-168 boundary delta.
+  assert.ok(
+    !fortuneRows.some((a) => a.person1_point === 'Part of Fortune' && a.person2_point === 'Mars' && a.aspect === 'square'),
+    'P1 Fortune square P2 Mars (2.38 deg) exceeds the derived class 2-deg square and should drop'
+  );
+
+  // P1 IC trine P2 Fortune is NOT in this list - IC mirrors MC and is never aspected (SUP-159).
   assert.ok(
     !fortuneRows.some((a) => a.person1_point === 'IC' || a.person2_point === 'IC'),
     'IC should never appear in a Fortune contact - only ASC/MC/PoF are aspectable angles'
   );
 
-  // Wide Fortune contacts that used to pass under the body-class 8/6-deg defaults now drop.
+  // Wide Fortune contacts that used to pass under the body-class 8/6-deg defaults still drop.
   assert.ok(
     !fortuneRows.some((a) => a.person1_point === 'Pluto' && a.person2_point === 'Part of Fortune' && a.aspect === 'trine'),
-    'Pluto trine PoF (4.18 deg) exceeds the point class 3-deg trine orb and should drop'
+    'Pluto trine PoF (4.18 deg) exceeds the derived class 2-deg trine orb and should drop'
   );
   assert.ok(
     !fortuneRows.some((a) => a.person1_point === 'Jupiter' && a.person2_point === 'Part of Fortune' && a.aspect === 'trine'),
-    'Jupiter trine PoF (7.77 deg) exceeds the point class 3-deg trine orb and should drop'
+    'Jupiter trine PoF (7.77 deg) exceeds the derived class 2-deg trine orb and should drop'
   );
   assert.ok(
     !fortuneRows.some((a) => a.person1_point === 'Part of Fortune' && a.person2_point === 'Saturn' && a.aspect === 'square'),
-    'PoF square Saturn (7.10 deg) exceeds the point class 3-deg square orb and should drop'
+    'PoF square Saturn (7.10 deg) exceeds the derived class 2-deg square orb and should drop'
   );
 
-  assert.equal(fortuneRows.length, 5, 'exactly five Fortune contacts survive the tighter point-class orb for this fixture pair (IC excluded, SUP-159)');
+  assert.equal(fortuneRows.length, 3, 'exactly three Fortune contacts survive the tighter derived-class orb for this fixture pair (IC excluded, SUP-159)');
 });
