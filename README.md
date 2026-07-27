@@ -207,6 +207,12 @@ Any tool that computes houses accepts an optional `house_system` code (default `
 
 An unknown code returns an `InvalidParams` error listing the valid codes.
 
+## Contributing
+
+Commit messages are linted against [Conventional Commits](https://www.conventionalcommits.org/) (`@commitlint/config-conventional`) via a husky `commit-msg` hook, e.g. `fix: ...`, `feat: ...`, `chore: ...`, `docs: ...`. The hook installs automatically on `npm install`/`npm ci` (`prepare: husky`) and runs `pnpm exec commitlint --edit` against each commit message.
+
+For WIP or otherwise non-conforming commits, bypass the hook with `git commit --no-verify`.
+
 ## Docker
 
 ```bash
