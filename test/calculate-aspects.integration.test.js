@@ -4,7 +4,7 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { SwissEphemerisServer } from '../index.js';
-import { ALL_CHARTS } from './fixtures/charts.js';
+import { ALL_CHARTS, DAY_CHART } from './fixtures/charts.js';
 
 if (!process.env.SE_EPHE_PATH) {
   process.env.SE_EPHE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../vendor/swisseph');
@@ -212,6 +212,36 @@ test('unknown body in bodies param throws InvalidParams', { skip: !HAS_SWETEST }
       bodies: ['NotARealBody'],
     }),
     /Unknown body/
+  );
+});
+
+// SUP-173/T1: orb_model is a seam only (moiety math lands in SUP-169/T3). With orb_model
+// unset or explicitly 'class', calculate_aspects must be byte-identical to today's output.
+test('orb_model seam: unset and explicit "class" are byte-identical on a real chart (DAY_CHART)', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const input = { datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude, include_angles: true, include_minor: true };
+
+  const unset = await server.handleToolCall('calculate_aspects', input);
+  const explicitClass = await server.handleToolCall('calculate_aspects', { ...input, orb_model: 'class' });
+
+  assert.deepEqual(unset, explicitClass);
+  assert.ok(unset.aspects.length > 0, 'sanity: DAY_CHART should produce aspects');
+  assert.equal(unset.settings_used.orb_model, 'class');
+});
+
+test('orb_model "moiety" is rejected as not-yet-implemented at the tool boundary', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  await assert.rejects(
+    () => server.handleToolCall('calculate_aspects', { ...REFERENCE_INPUT, orb_model: 'moiety' }),
+    /not yet implemented/
+  );
+});
+
+test('orb_model rejects an unknown value at the tool boundary', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  await assert.rejects(
+    () => server.handleToolCall('calculate_aspects', { ...REFERENCE_INPUT, orb_model: 'bogus' }),
+    /orb_model must be one of/
   );
 });
 
