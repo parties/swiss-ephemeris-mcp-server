@@ -165,7 +165,7 @@ class SwissEphemerisServer {
                 orb_model: {
                   type: 'string',
                   enum: ['class', 'moiety'],
-                  description: 'Orb resolution model for transit_aspects. "class" (default) uses the fixed per-class orb tables above. "moiety" (per-body summed half-orbs) is reserved for a future release and currently errors if selected.',
+                  description: 'Orb resolution model for transit_aspects. "class" (default) uses the fixed per-class orb tables above and honors orb_overrides. "moiety" instead sums each body\'s half-orb (e.g. Sun 7.5°, Moon 6°) and scales by the aspect\'s multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under "moiety", orb_overrides is ignored.',
                 },
               },
               required: ['birth_datetime', 'latitude', 'longitude'],
@@ -255,7 +255,7 @@ class SwissEphemerisServer {
                 orb_model: {
                   type: 'string',
                   enum: ['class', 'moiety'],
-                  description: 'Orb resolution model. "class" (default) uses the fixed per-class orb tables above. "moiety" (per-body summed half-orbs) is reserved for a future release and currently errors if selected.',
+                  description: 'Orb resolution model. "class" (default) uses the fixed per-class orb tables above and honors orb_overrides. "moiety" instead sums each body\'s half-orb and scales by the aspect\'s multiplier — see calculate_aspects for the formula and an example. Under "moiety", orb_overrides is ignored.',
                 },
                 person1_house_system: {
                   type: 'string',
@@ -312,7 +312,7 @@ class SwissEphemerisServer {
                 orb_model: {
                   type: 'string',
                   enum: ['class', 'moiety'],
-                  description: 'Orb resolution model. "class" (default) uses the fixed per-class orb tables above. "moiety" (per-body summed half-orbs) is reserved for a future release and currently errors if selected.',
+                  description: 'Orb resolution model. "class" (default) uses the fixed per-class orb tables above and honors orb_overrides. "moiety" instead sums each body\'s half-orb (per-body table, e.g. Sun 7.5°, Moon 6°, Ascendant 2.5°) and scales by the aspect\'s multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under "moiety", orb_overrides is ignored.',
                 },
                 house_system: {
                   type: 'string',
