@@ -87,7 +87,7 @@ Calculate birth chart positions and current transits for comparison, including a
 - `longitude` (number): Birth longitude in decimal degrees
 - `house_system` (string, optional): House system code applied to both charts. Default `P`. See [House Systems](#house-systems).
 - `include_minor` (boolean, optional): Include minor aspects in `transit_aspects`. Default `false`.
-- `include_angles` (boolean, optional): Include chart angles in `transit_aspects`. Default `false`.
+- `include_angles` (boolean, optional): Include the **natal** chart's angles (Ascendant, Midheaven, IC, Descendant, Part of Fortune) as aspect targets in `transit_aspects`. Default `false`. Transiting angles are never aspected — they are artifacts of the moment's location and time of day, so a transiting-Ascendant contact is a different contact minutes later.
 - `include_south_node` (boolean, optional): Include South Node in `transit_aspects`. Default `false`.
 - `bodies` (array of strings, optional): Override the default body list for `transit_aspects`.
 - `orb_overrides` (object, optional): Per-aspect orb overrides in degrees for `transit_aspects`. Also accepts a per-class shape, e.g. `{"angle": {"square": 4}}` or `{"derived": {"square": 2}}`, to move only the `angle` class (Ascendant/Midheaven/IC/Descendant) or `derived` class (Part of Fortune, Vertex) without touching `body`. `angle` defaults to 5/4/3/1.5/1.5/1 deg (conjunction-opposition/square/trine-sextile/semisextile-quincunx/semisquare-sesquiquadrate/quintile-biquintile); `derived` defaults to 3/2/2/1 deg (conjunction-opposition/square/trine-sextile/all minors) — both tighter than `body`'s defaults.
