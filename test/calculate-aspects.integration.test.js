@@ -156,9 +156,10 @@ test('reference chart 8 (cross-check): calculate_aspects longitudes byte-match c
 
 test('orb_overrides tightens qualifying pairs on a real chart', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
-  const wide = await server.handleToolCall('calculate_aspects', REFERENCE_INPUT);
+  const wide = await server.handleToolCall('calculate_aspects', { ...REFERENCE_INPUT, orb_model: 'class' });
   const tight = await server.handleToolCall('calculate_aspects', {
     ...REFERENCE_INPUT,
+    orb_model: 'class',
     orb_overrides: { conjunction: 0.01, opposition: 0.01, trine: 0.01, square: 0.01, sextile: 0.01 },
   });
   assert.ok(tight.aspects.length <= wide.aspects.length);
@@ -170,10 +171,11 @@ test('orb_overrides tightens qualifying pairs on a real chart', { skip: !HAS_SWE
 // to reach every angle-family body.
 test('orb_overrides per-class shape reaches the angle and derived classes through the tool boundary', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
-  const wide = await server.handleToolCall('calculate_aspects', { ...REFERENCE_INPUT, include_angles: true });
+  const wide = await server.handleToolCall('calculate_aspects', { ...REFERENCE_INPUT, orb_model: 'class', include_angles: true });
   const tightOverride = { conjunction: 0.01, opposition: 0.01, trine: 0.01, square: 0.01, sextile: 0.01 };
   const tight = await server.handleToolCall('calculate_aspects', {
     ...REFERENCE_INPUT,
+    orb_model: 'class',
     include_angles: true,
     orb_overrides: { angle: tightOverride, derived: tightOverride },
   });
@@ -215,18 +217,18 @@ test('unknown body in bodies param throws InvalidParams', { skip: !HAS_SWETEST }
   );
 });
 
-// With orb_model unset or explicitly 'class', calculate_aspects must be byte-identical
-// to today's output — 'class' stays the default and moiety mode is opt-in only.
-test('orb_model seam: unset and explicit "class" are byte-identical on a real chart (DAY_CHART)', { skip: !HAS_SWETEST }, async () => {
+// With orb_model unset or explicitly 'moiety', calculate_aspects must be byte-identical —
+// 'moiety' is the default (SUP-179/T3) and 'class' remains available as an explicit opt-in.
+test('orb_model seam: unset and explicit "moiety" are byte-identical on a real chart (DAY_CHART)', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
   const input = { datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude, include_angles: true, include_minor: true };
 
   const unset = await server.handleToolCall('calculate_aspects', input);
-  const explicitClass = await server.handleToolCall('calculate_aspects', { ...input, orb_model: 'class' });
+  const explicitMoiety = await server.handleToolCall('calculate_aspects', { ...input, orb_model: 'moiety' });
 
-  assert.deepEqual(unset, explicitClass);
+  assert.deepEqual(unset, explicitMoiety);
   assert.ok(unset.aspects.length > 0, 'sanity: DAY_CHART should produce aspects');
-  assert.equal(unset.settings_used.orb_model, 'class');
+  assert.equal(unset.settings_used.orb_model, 'moiety');
 });
 
 test('orb_model "moiety" is accepted at the tool boundary', { skip: !HAS_SWETEST }, async () => {
@@ -276,6 +278,7 @@ test('orb_overrides rejects a moiety-shape override in class mode', { skip: !HAS
   await assert.rejects(
     () => server.handleToolCall('calculate_aspects', {
       ...REFERENCE_INPUT,
+      orb_model: 'class',
       orb_overrides: { moieties: { Sun: 10 } },
     }),
     /Unknown aspect in orb_overrides/

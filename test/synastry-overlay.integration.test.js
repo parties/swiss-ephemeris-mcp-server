@@ -117,6 +117,7 @@ test('calculate_synastry include_angles: derived-class orb drops wide Fortune co
     person2_latitude: PARTNER_CHART.latitude,
     person2_longitude: PARTNER_CHART.longitude,
     include_angles: true,
+    orb_model: 'class',
   });
 
   const fortuneRows = result.angle_aspects.filter(

@@ -7,8 +7,8 @@ test('calculateCrossChartAspects matches calculateNatalAspects orb table for the
   const a = { name: 'A', longitude: 0, speed: 0.5 };
   const b = { name: 'B', longitude: 95, speed: -0.2 }; // 95 deg separation -> square orb 5
 
-  const natal = calculateNatalAspects([a, b], {});
-  const cross = calculateCrossChartAspects([a], [b], {});
+  const natal = calculateNatalAspects([a, b], { orbModel: 'class' });
+  const cross = calculateCrossChartAspects([a], [b], { orbModel: 'class' });
 
   assert.equal(natal.length, 1);
   assert.equal(cross.length, 1);
@@ -21,10 +21,10 @@ test('calculateCrossChartAspects includeMinor toggle matches natal engine defaul
   const a = { name: 'A', longitude: 0, speed: 0 };
   const b = { name: 'B', longitude: 72, speed: 0 }; // exact quintile (minor)
 
-  const withoutMinor = calculateCrossChartAspects([a], [b], { includeMinor: false });
+  const withoutMinor = calculateCrossChartAspects([a], [b], { orbModel: 'class', includeMinor: false });
   assert.ok(!withoutMinor.some((x) => x.aspect === 'quintile'));
 
-  const withMinor = calculateCrossChartAspects([a], [b], { includeMinor: true });
+  const withMinor = calculateCrossChartAspects([a], [b], { orbModel: 'class', includeMinor: true });
   assert.ok(withMinor.some((x) => x.aspect === 'quintile'));
 });
 
