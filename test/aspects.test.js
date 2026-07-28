@@ -10,6 +10,8 @@ import {
   BODY_ORB_CLASS,
   MAJOR_ASPECTS,
   MINOR_ASPECTS,
+  MOIETIES,
+  ASPECT_MULTIPLIERS,
   normalizeSeparation,
   computeApplying,
   calculateNatalAspects,
@@ -388,18 +390,6 @@ test('orb_model seam: unset and explicit "class" produce byte-identical cross-ch
   assert.ok(unset.length > 0, 'sanity: this fixture should actually produce aspects');
 });
 
-test('orb_model "moiety" is a not-yet-implemented stub: it throws rather than silently matching', () => {
-  const bodies = [
-    { name: 'Sun', longitude: 0, speed: 1 },
-    { name: 'Moon', longitude: 90, speed: 12 },
-  ];
-
-  assert.throws(
-    () => calculateNatalAspects(bodies, { orbModel: 'moiety' }),
-    /moiety.*not yet implemented/
-  );
-});
-
 test('orb_model rejects unknown values', () => {
   assert.throws(
     () => calculateNatalAspects([], { orbModel: 'bogus' }),
@@ -409,4 +399,35 @@ test('orb_model rejects unknown values', () => {
 
 test('ORB_MODELS exports exactly the two known model names', () => {
   assert.deepEqual(ORB_MODELS, ['class', 'moiety']);
+});
+
+test('MOIETIES: mirror pairs are equal (IC=Midheaven, Descendant=Ascendant)', () => {
+  assert.equal(MOIETIES.IC, MOIETIES.Midheaven);
+  assert.equal(MOIETIES.Descendant, MOIETIES.Ascendant);
+});
+
+test('MOIETIES: Sun..Saturn match the halved classical values exactly', () => {
+  assert.equal(MOIETIES.Sun, 7.5);
+  assert.equal(MOIETIES.Moon, 6);
+  assert.equal(MOIETIES.Mercury, 3.5);
+  assert.equal(MOIETIES.Venus, 3.5);
+  assert.equal(MOIETIES.Mars, 4);
+  assert.equal(MOIETIES.Jupiter, 4.5);
+  assert.equal(MOIETIES.Saturn, 4.5);
+});
+
+test('ASPECT_MULTIPLIERS: exact keys and values', () => {
+  assert.deepEqual(ASPECT_MULTIPLIERS, {
+    conjunction: 1.0,
+    opposition: 1.0,
+    trine: 1.0,
+    square: 1.0,
+    sextile: 0.75,
+    semisextile: 0.375,
+    semisquare: 0.375,
+    sesquiquadrate: 0.375,
+    quincunx: 0.375,
+    quintile: 0.375,
+    biquintile: 0.375,
+  });
 });

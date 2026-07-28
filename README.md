@@ -210,6 +210,29 @@ Any tool that computes houses accepts an optional `house_system` code (default `
 
 An unknown code returns an `InvalidParams` error listing the valid codes.
 
+## Contributing
+
+Commit messages are linted against [Conventional Commits](https://www.conventionalcommits.org/) (`@commitlint/config-conventional`) via a husky `commit-msg` hook, e.g. `fix: ...`, `feat: ...`, `chore: ...`, `docs: ...`. The hook installs automatically on `npm install`/`npm ci` (`prepare: husky`) and runs `pnpm exec commitlint --edit` against each commit message.
+
+For WIP or otherwise non-conforming commits, bypass the hook with `git commit --no-verify`.
+
+PR titles are also checked in CI against Conventional Commits (`.github/workflows/pr-title-lint.yml`, via `amannn/action-semantic-pull-request`), since this repo squash-merges with the PR title as the resulting commit message — a non-conforming title will fail the check even if the individual commits are fine.
+
+This is what makes releases automatic (see [Releases](#releases) below): every commit that lands on `main` has a Conventional Commits type, and [semantic-release](https://semantic-release.gitbook.io/) reads that history to decide the next version.
+
+## Releases
+
+Releases are automated with [semantic-release](https://semantic-release.gitbook.io/) (`.releaserc.json`, `.github/workflows/release.yml`). Every push to `main` runs `npx semantic-release`, which:
+
+1. Reads the Conventional Commits since the last release tag to decide the version bump — `fix:` → patch, `feat:` → minor, a `BREAKING CHANGE:` footer (or `!` after the type) → major. If nothing on `main` warrants a release, it's a no-op.
+2. Generates release notes and prepends them to `CHANGELOG.md`.
+3. Bumps `version` in `package.json`.
+4. Commits `CHANGELOG.md` and `package.json` back to `main` as `chore(release): <version> [skip ci]`, tags the commit, and publishes a GitHub Release.
+
+`npm` publishing is disabled (`@semantic-release/npm` runs with `npmPublish: false`) — this project isn't published to a registry; the plugin is only used for the local version bump/tag bookkeeping. The release history starts from the `v1.0.2` baseline tag seeded on this repo; earlier changes aren't retroactively versioned.
+
+`CHANGELOG.md` currently has a hand-written "Unreleased" section predating this automation (see its own history) — semantic-release will prepend future entries above it rather than merge with it, so expect the top of the file to have both a manual and a generated section until that's reconciled.
+
 ## Docker
 
 ```bash
