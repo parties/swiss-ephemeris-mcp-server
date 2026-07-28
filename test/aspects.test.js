@@ -431,3 +431,63 @@ test('ASPECT_MULTIPLIERS: exact keys and values', () => {
     biquintile: 0.375,
   });
 });
+
+// SUP-175/T3: moiety pair-orb resolver. orbAllowed = (MOIETIES[a] + MOIETIES[b]) *
+// ASPECT_MULTIPLIERS[aspect], replacing the class-table min() lookup when orbModel is 'moiety'.
+test('orb_model "moiety": Sun-Moon conjunction pair orb is 13.5deg', () => {
+  const bodies = [
+    { name: 'Sun', longitude: 0, speed: 1 },
+    { name: 'Moon', longitude: 0, speed: 12 },
+  ];
+  const [match] = calculateNatalAspects(bodies, { orbModel: 'moiety' });
+
+  assert.equal(match.aspect, 'conjunction');
+  assert.equal(match.orb_allowed, 13.5);
+});
+
+test('orb_model "moiety": Sun-Ascendant conjunction pair orb is 10deg', () => {
+  const bodies = [
+    { name: 'Sun', longitude: 0, speed: 1 },
+    { name: 'Ascendant', longitude: 0, speed: null },
+  ];
+  const [match] = calculateNatalAspects(bodies, { orbModel: 'moiety', includeAngles: true });
+
+  assert.equal(match.aspect, 'conjunction');
+  assert.equal(match.orb_allowed, 10);
+});
+
+// Smaller than Sun-Ascendant (10deg) even though Pluto is the outer body — class mode
+// can't express this because ASC's angle-class orb is fixed regardless of partner (SUP-169).
+test('orb_model "moiety": Pluto-Ascendant conjunction pair orb is 5deg', () => {
+  const bodies = [
+    { name: 'Pluto', longitude: 0, speed: 0.003 },
+    { name: 'Ascendant', longitude: 0, speed: null },
+  ];
+  const [match] = calculateNatalAspects(bodies, { orbModel: 'moiety', includeAngles: true });
+
+  assert.equal(match.aspect, 'conjunction');
+  assert.equal(match.orb_allowed, 5);
+});
+
+test('orb_model "moiety": Sun-Moon sextile pair orb uses the 0.75 multiplier -> 10.125deg', () => {
+  const bodies = [
+    { name: 'Sun', longitude: 0, speed: 1 },
+    { name: 'Moon', longitude: 60, speed: 12 },
+  ];
+  const [match] = calculateNatalAspects(bodies, { orbModel: 'moiety' });
+
+  assert.equal(match.aspect, 'sextile');
+  assert.equal(match.orb_allowed, 10.125);
+});
+
+test('orb_model "class" (default) is unaffected by the moiety resolver', () => {
+  const bodies = [
+    { name: 'Sun', longitude: 0, speed: 1 },
+    { name: 'Moon', longitude: 0, speed: 12 },
+  ];
+  const explicitClass = calculateNatalAspects(bodies, { orbModel: 'class' });
+  const defaulted = calculateNatalAspects(bodies);
+
+  assert.deepEqual(explicitClass, defaulted);
+  assert.equal(explicitClass[0].orb_allowed, 8, 'sanity: class-mode body/body conjunction orb is untouched');
+});
