@@ -568,3 +568,74 @@ test('invalidOrbOverrideKeys: unknown body/aspect key rejected in moiety mode', 
   );
   assert.deepEqual(invalid.sort(), ['NotABody', 'notAnAspect']);
 });
+
+// SUP-177/T5: regression invariants for the moiety orb system. These guard the
+// *relationships* the constants must preserve, not just one formula output, so a future
+// edit to MOIETIES/ASPECT_MULTIPLIERS that quietly breaks the ordering gets caught even if
+// no single spot-check value changes.
+
+const REPRESENTATIVE_PAIRS = [
+  ['Sun', 'Sun'],
+  ['Pluto', 'Pluto'],
+  ['Sun', 'Moon'],
+  ['Moon', 'Saturn'],
+  ['Mercury', 'Venus'],
+  ['Sun', 'Ascendant'],
+  ['Pluto', 'Ascendant'],
+];
+
+// Places body A at 0deg and body B exactly on the target aspect angle, so the engine's
+// only match is that aspect - orb_allowed then reflects the real matchAspectsForPair path
+// (not a re-derivation of the formula in the test).
+function pairOrbAllowed(nameA, nameB, aspectName) {
+  const targetAngle = MAJOR_ASPECTS[aspectName] ?? MINOR_ASPECTS[aspectName];
+  const bodies = [
+    { name: nameA, longitude: 0, speed: 1 },
+    { name: nameB, longitude: targetAngle, speed: 1 },
+  ];
+  const [match] = calculateNatalAspects(bodies, { orbModel: 'moiety', includeMinor: true, includeAngles: true });
+  return match.orb_allowed;
+}
+
+test('moiety invariant: every representative pair keeps every minor-aspect orb narrower than every major-aspect orb', () => {
+  for (const [a, b] of REPRESENTATIVE_PAIRS) {
+    const minorOrbs = Object.keys(MINOR_ASPECTS).map((aspect) => pairOrbAllowed(a, b, aspect));
+    const majorOrbs = Object.keys(MAJOR_ASPECTS).map((aspect) => pairOrbAllowed(a, b, aspect));
+    const maxMinor = Math.max(...minorOrbs);
+    const minMajor = Math.min(...majorOrbs);
+    assert.ok(
+      maxMinor < minMajor,
+      `${a}-${b}: max minor orb ${maxMinor} should be < min major orb ${minMajor}`
+    );
+  }
+});
+
+// AstrologyAdvisor addition: a same-pair-only test can't catch a cross-pair regression
+// like the one SUP-168 caught. This compares a major aspect on one pair against a minor
+// aspect on an entirely different, weaker-moiety pair.
+test('moiety invariant: cross-body minor orb stays narrower than an unrelated major orb (Moon-Saturn square vs Mercury-Venus quincunx)', () => {
+  const majorOrb = pairOrbAllowed('Moon', 'Saturn', 'square');
+  const minorOrb = pairOrbAllowed('Mercury', 'Venus', 'quincunx');
+
+  assert.equal(majorOrb, 10.5, '(6 + 4.5) * 1.0');
+  assert.equal(minorOrb, 2.625, '(3.5 + 3.5) * 0.375');
+  assert.ok(minorOrb < majorOrb);
+});
+
+test('moiety invariant: mirror symmetry - Sun-Ascendant pair orb equals Sun-Descendant pair orb', () => {
+  // Descendant is excluded from aspect matching (ASPECTABLE_ANGLES), so this is checked
+  // directly against the moiety formula rather than through calculateNatalAspects.
+  const ascOrb = (MOIETIES.Sun + MOIETIES.Ascendant) * ASPECT_MULTIPLIERS.conjunction;
+  const dscOrb = (MOIETIES.Sun + MOIETIES.Descendant) * ASPECT_MULTIPLIERS.conjunction;
+
+  assert.equal(ascOrb, dscOrb);
+});
+
+test('moiety invariant: Sun-Ascendant conjunction orb is wider than Pluto-Ascendant conjunction orb (SUP-169 motivating case)', () => {
+  const sunAscOrb = pairOrbAllowed('Sun', 'Ascendant', 'conjunction');
+  const plutoAscOrb = pairOrbAllowed('Pluto', 'Ascendant', 'conjunction');
+
+  assert.equal(sunAscOrb, 10);
+  assert.equal(plutoAscOrb, 5);
+  assert.ok(sunAscOrb > plutoAscOrb);
+});
