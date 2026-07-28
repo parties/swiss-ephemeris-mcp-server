@@ -9,6 +9,8 @@ import {
   BODY_ORB_CLASS,
   MAJOR_ASPECTS,
   MINOR_ASPECTS,
+  MOIETIES,
+  ASPECT_MULTIPLIERS,
   normalizeSeparation,
   computeApplying,
   calculateNatalAspects,
@@ -355,4 +357,35 @@ test('orb_overrides flat shape still applies globally across both classes', () =
   const tightened = { orbOverrides: { square: 2 }, includeAngles: true };
   assert.ok(!calculateNatalAspects(bodies, tightened).some((a) => a.aspect === 'square'));
   assert.ok(!calculateNatalAspects(points, tightened).some((a) => a.aspect === 'square'));
+});
+
+test('MOIETIES: mirror pairs are equal (IC=Midheaven, Descendant=Ascendant)', () => {
+  assert.equal(MOIETIES.IC, MOIETIES.Midheaven);
+  assert.equal(MOIETIES.Descendant, MOIETIES.Ascendant);
+});
+
+test('MOIETIES: Sun..Saturn match the halved classical values exactly', () => {
+  assert.equal(MOIETIES.Sun, 7.5);
+  assert.equal(MOIETIES.Moon, 6);
+  assert.equal(MOIETIES.Mercury, 3.5);
+  assert.equal(MOIETIES.Venus, 3.5);
+  assert.equal(MOIETIES.Mars, 4);
+  assert.equal(MOIETIES.Jupiter, 4.5);
+  assert.equal(MOIETIES.Saturn, 4.5);
+});
+
+test('ASPECT_MULTIPLIERS: exact keys and values', () => {
+  assert.deepEqual(ASPECT_MULTIPLIERS, {
+    conjunction: 1.0,
+    opposition: 1.0,
+    trine: 1.0,
+    square: 1.0,
+    sextile: 0.75,
+    semisextile: 0.375,
+    semisquare: 0.375,
+    sesquiquadrate: 0.375,
+    quincunx: 0.375,
+    quintile: 0.375,
+    biquintile: 0.375,
+  });
 });
