@@ -6,6 +6,7 @@ import {
   ASPECTABLE_ANGLES,
   DEFAULT_ORBS,
   ORB_CLASSES,
+  ORB_MODELS,
   BODY_ORB_CLASS,
   MAJOR_ASPECTS,
   MINOR_ASPECTS,
@@ -14,6 +15,7 @@ import {
   normalizeSeparation,
   computeApplying,
   calculateNatalAspects,
+  calculateCrossChartAspects,
   calculateHouseOverlay,
   resolveChartPoint,
   toAspectBody,
@@ -388,4 +390,56 @@ test('ASPECT_MULTIPLIERS: exact keys and values', () => {
     quintile: 0.375,
     biquintile: 0.375,
   });
+});
+
+// SUP-173/T1: orb_model is a seam only - 'class' (default) must behave exactly as before,
+// and 'moiety' is reserved for SUP-169/T3 and must fail loudly rather than silently
+// falling back to class orbs or matching nothing.
+test('orb_model seam: unset and explicit "class" produce byte-identical natal aspect output', () => {
+  const bodies = [
+    { name: 'Sun', longitude: 0, speed: 1 },
+    { name: 'Moon', longitude: 90, speed: 12 },
+    { name: 'Ascendant', longitude: 3, speed: null },
+    { name: 'Part of Fortune', longitude: 91, speed: null },
+  ];
+
+  const unset = calculateNatalAspects(bodies, { includeAngles: true });
+  const explicitClass = calculateNatalAspects(bodies, { includeAngles: true, orbModel: 'class' });
+
+  assert.deepEqual(unset, explicitClass);
+  assert.ok(unset.length > 0, 'sanity: this fixture should actually produce aspects');
+});
+
+test('orb_model seam: unset and explicit "class" produce byte-identical cross-chart aspect output', () => {
+  const bodiesA = [{ name: 'Sun', longitude: 0, speed: 1 }];
+  const bodiesB = [{ name: 'Moon', longitude: 90, speed: 12 }];
+
+  const unset = calculateCrossChartAspects(bodiesA, bodiesB, {});
+  const explicitClass = calculateCrossChartAspects(bodiesA, bodiesB, { orbModel: 'class' });
+
+  assert.deepEqual(unset, explicitClass);
+  assert.ok(unset.length > 0, 'sanity: this fixture should actually produce aspects');
+});
+
+test('orb_model "moiety" is a not-yet-implemented stub: it throws rather than silently matching', () => {
+  const bodies = [
+    { name: 'Sun', longitude: 0, speed: 1 },
+    { name: 'Moon', longitude: 90, speed: 12 },
+  ];
+
+  assert.throws(
+    () => calculateNatalAspects(bodies, { orbModel: 'moiety' }),
+    /moiety.*not yet implemented/
+  );
+});
+
+test('orb_model rejects unknown values', () => {
+  assert.throws(
+    () => calculateNatalAspects([], { orbModel: 'bogus' }),
+    /Unknown orb_model/
+  );
+});
+
+test('ORB_MODELS exports exactly the two known model names', () => {
+  assert.deepEqual(ORB_MODELS, ['class', 'moiety']);
 });

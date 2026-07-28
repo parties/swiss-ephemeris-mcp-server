@@ -30,7 +30,14 @@ import {
   findHouseForLongitude,
   toAspectBody,
   invalidOrbOverrideKeys,
+  ORB_MODELS,
 } from './lib/aspects.js';
+
+function validateOrbModel(orbModel) {
+  if (orbModel !== undefined && !ORB_MODELS.includes(orbModel)) {
+    throw new McpError(ErrorCode.InvalidParams, `orb_model must be one of: ${ORB_MODELS.join(', ')}`);
+  }
+}
 
 const SYNASTRY_BODIES = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
 
@@ -155,6 +162,11 @@ class SwissEphemerisServer {
                   description: 'Per-aspect orb overrides in degrees for transit_aspects, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"angle": {"square": 4}} or {"derived": {"square": 2}} tightens the angle (Ascendant/Midheaven/IC/Descendant) or derived (Part of Fortune/Vertex) class without touching planets.',
                   additionalProperties: { type: ['number', 'object'] },
                 },
+                orb_model: {
+                  type: 'string',
+                  enum: ['class', 'moiety'],
+                  description: 'Orb resolution model for transit_aspects. "class" (default) uses the fixed per-class orb tables above. "moiety" (per-body summed half-orbs) is reserved for a future release and currently errors if selected.',
+                },
               },
               required: ['birth_datetime', 'latitude', 'longitude'],
             },
@@ -240,6 +252,11 @@ class SwissEphemerisServer {
                   description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"angle": {"square": 4}} or {"derived": {"square": 2}} tightens the angle (Ascendant/Midheaven/IC/Descendant) or derived (Part of Fortune/Vertex) class without touching planets.',
                   additionalProperties: { type: ['number', 'object'] },
                 },
+                orb_model: {
+                  type: 'string',
+                  enum: ['class', 'moiety'],
+                  description: 'Orb resolution model. "class" (default) uses the fixed per-class orb tables above. "moiety" (per-body summed half-orbs) is reserved for a future release and currently errors if selected.',
+                },
                 person1_house_system: {
                   type: 'string',
                   description: 'House system code for person 1: P=Placidus (default), K=Koch, O=Porphyry, R=Regiomontanus, C=Campanus, E=Equal, W=Whole Sign, B=Alcabitus, M=Morinus, T=Topocentric.',
@@ -291,6 +308,11 @@ class SwissEphemerisServer {
                   type: 'object',
                   description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"angle": {"square": 4}} or {"derived": {"square": 2}} tightens the angle (Ascendant/Midheaven/IC/Descendant) or derived (Part of Fortune/Vertex) class without touching planets.',
                   additionalProperties: { type: ['number', 'object'] },
+                },
+                orb_model: {
+                  type: 'string',
+                  enum: ['class', 'moiety'],
+                  description: 'Orb resolution model. "class" (default) uses the fixed per-class orb tables above. "moiety" (per-body summed half-orbs) is reserved for a future release and currently errors if selected.',
                 },
                 house_system: {
                   type: 'string',
@@ -608,6 +630,7 @@ class SwissEphemerisServer {
       includeAngles = false,
       includeSouthNode = false,
       orbOverrides = {},
+      orbModel = 'class',
     } = options;
 
     const { bodiesWithLonSpeed, requestedBodies } = this.resolveAspectBodies(ephemerisResult, options);
@@ -615,6 +638,7 @@ class SwissEphemerisServer {
     const aspects = calculateNatalAspects(bodiesWithLonSpeed, {
       includeMinor,
       orbOverrides,
+      orbModel,
       includeAngles,
       includeSouthNode,
     });
@@ -627,6 +651,7 @@ class SwissEphemerisServer {
         include_south_node: includeSouthNode,
         bodies: requestedBodies,
         orb_overrides: orbOverrides,
+        orb_model: orbModel,
       },
     };
   }
@@ -640,6 +665,7 @@ class SwissEphemerisServer {
       includeAngles = false,
       includeSouthNode = false,
       orbOverrides = {},
+      orbModel = 'class',
     } = options;
 
     const { bodiesWithLonSpeed: natalBodies, requestedBodies } = this.resolveAspectBodies(natalChart, options);
@@ -648,6 +674,7 @@ class SwissEphemerisServer {
     const aspects = calculateCrossChartAspects(transitBodies, natalBodies, {
       includeMinor,
       orbOverrides,
+      orbModel,
     }).map((a) => ({
       transiting_body: a.body_a,
       natal_body: a.body_b,
@@ -666,6 +693,7 @@ class SwissEphemerisServer {
         include_south_node: includeSouthNode,
         bodies: requestedBodies,
         orb_overrides: orbOverrides,
+        orb_model: orbModel,
       },
     };
   }
@@ -776,6 +804,7 @@ class SwissEphemerisServer {
           include_south_node: transit_include_south_node,
           bodies: transit_bodies,
           orb_overrides: transit_orb_overrides,
+          orb_model: transit_orb_model,
         } = args;
 
         if (!birth_datetime || typeof birth_datetime !== 'string') {
@@ -819,6 +848,8 @@ class SwissEphemerisServer {
           throw new McpError(ErrorCode.InvalidParams, 'orb_overrides must be an object');
         }
 
+        validateOrbModel(transit_orb_model);
+
         const validatedTransitHouseSystem = validateHouseSystem(transit_house_system);
 
         // Calculate birth chart
@@ -835,6 +866,7 @@ class SwissEphemerisServer {
            includeSouthNode: transit_include_south_node,
            bodies: transit_bodies,
            orbOverrides: transit_orb_overrides,
+           orbModel: transit_orb_model,
          });
 
          return {
@@ -914,7 +946,7 @@ class SwissEphemerisServer {
         };
 
       case 'calculate_synastry':
-        const { person1_datetime, person1_latitude, person1_longitude, person2_datetime, person2_latitude, person2_longitude, include_minor: synastry_include_minor, include_angles: synastry_include_angles, orb_overrides: synastry_orb_overrides, person1_house_system, person2_house_system } = args;
+        const { person1_datetime, person1_latitude, person1_longitude, person2_datetime, person2_latitude, person2_longitude, include_minor: synastry_include_minor, include_angles: synastry_include_angles, orb_overrides: synastry_orb_overrides, orb_model: synastry_orb_model, person1_house_system, person2_house_system } = args;
 
         if (synastry_include_minor !== undefined && typeof synastry_include_minor !== 'boolean') {
           throw new McpError(ErrorCode.InvalidParams, 'include_minor must be a boolean');
@@ -934,6 +966,8 @@ class SwissEphemerisServer {
             throw new McpError(ErrorCode.InvalidParams, `Unknown aspect in orb_overrides: ${invalidSynastryOrbKeys[0]}`);
           }
         }
+
+        validateOrbModel(synastry_orb_model);
 
         if (!person1_datetime || typeof person1_datetime !== 'string') {
           throw new McpError(
@@ -987,6 +1021,7 @@ class SwissEphemerisServer {
         const aspects = this.calculateSynastryAspects(person1NatalChart.planets, person2NatalChart.planets, {
           includeMinor: synastry_include_minor,
           orbOverrides: synastry_orb_overrides,
+          orbModel: synastry_orb_model,
         });
 
         // House overlay: which of the other person's houses each planet falls into
@@ -1008,6 +1043,7 @@ class SwissEphemerisServer {
           angleAspects = this.calculateSynastryAngleAspects(person1NatalChart, person2NatalChart, {
             includeMinor: synastry_include_minor,
             orbOverrides: synastry_orb_overrides,
+            orbModel: synastry_orb_model,
           });
         }
 
@@ -1030,6 +1066,7 @@ class SwissEphemerisServer {
           include_south_node,
           bodies: aspects_bodies,
           orb_overrides,
+          orb_model,
           house_system: aspects_house_system,
         } = args;
 
@@ -1074,6 +1111,8 @@ class SwissEphemerisServer {
           throw new McpError(ErrorCode.InvalidParams, 'orb_overrides must be an object');
         }
 
+        validateOrbModel(orb_model);
+
         const aspectsEphemerisResult = this.calculateEphemeris(aspects_datetime, aspects_latitude, aspects_longitude, validateHouseSystem(aspects_house_system));
         const { aspects: chartAspects, settings_used } = this.calculateChartAspects(aspectsEphemerisResult, {
           includeMinor: include_minor,
@@ -1081,6 +1120,7 @@ class SwissEphemerisServer {
           includeSouthNode: include_south_node,
           bodies: aspects_bodies,
           orbOverrides: orb_overrides,
+          orbModel: orb_model,
         });
 
         return {
