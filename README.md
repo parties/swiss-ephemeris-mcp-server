@@ -91,7 +91,7 @@ Calculate birth chart positions and current transits for comparison, including a
 - `include_south_node` (boolean, optional): Include South Node in `transit_aspects`. Default `false`.
 - `bodies` (array of strings, optional): Override the default body list for `transit_aspects`.
 - `orb_overrides` (object, optional): Per-aspect orb overrides in degrees for `transit_aspects`. Also accepts a per-class shape, e.g. `{"angle": {"square": 4}}` or `{"derived": {"square": 2}}`, to move only the `angle` class (Ascendant/Midheaven/IC/Descendant) or `derived` class (Part of Fortune, Vertex) without touching `body`. `angle` defaults to 5/4/3/1.5/1.5/1 deg (conjunction-opposition/square/trine-sextile/semisextile-quincunx/semisquare-sesquiquadrate/quintile-biquintile); `derived` defaults to 3/2/2/1 deg (conjunction-opposition/square/trine-sextile/all minors) — both tighter than `body`'s defaults.
-- `orb_model` (string, optional): Orb resolution model for `transit_aspects`. `"class"` (default) uses the fixed per-class tables above and honors `orb_overrides`. `"moiety"` instead sums each body's half-orb (e.g. Sun 7.5°, Moon 6°) and scales by the aspect's multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under `"moiety"`, `orb_overrides` takes a different two-knob shape instead: `{"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}`.
+- `orb_model` (string, optional): Orb resolution model for `transit_aspects`. `"class"` (default) uses the fixed per-class tables above and honors `orb_overrides`. `"moiety"` instead sums each body's half-orb (e.g. Sun 7.5°, Moon 6°) and scales by the aspect's multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under `"moiety"`, `orb_overrides` takes a different two-knob shape instead: `{"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}`. See [Orb Models](#orb-models) for moiety provenance and why sextile stays a major aspect.
 
 **Returns:**
 - `natal_chart`: Complete birth chart data
@@ -136,7 +136,7 @@ Calculate synastry chart between two people for relationship compatibility analy
 - `include_minor` (boolean, optional): Include minor aspects. Default `false`.
 - `include_angles` (boolean, optional): Also compute `angle_aspects` (planet-to-angle and angle-to-angle contacts). Default `false`.
 - `orb_overrides` (object, optional): Per-aspect orb overrides in degrees. Also accepts a per-class shape, e.g. `{"angle": {"square": 4}}` or `{"derived": {"square": 2}}`, to move only the `angle` class (Ascendant/Midheaven/IC/Descendant) or `derived` class (Part of Fortune, Vertex) without touching `body`. `angle` defaults to 5/4/3/1.5/1.5/1 deg (conjunction-opposition/square/trine-sextile/semisextile-quincunx/semisquare-sesquiquadrate/quintile-biquintile); `derived` defaults to 3/2/2/1 deg (conjunction-opposition/square/trine-sextile/all minors) — both tighter than `body`'s defaults.
-- `orb_model` (string, optional): Orb resolution model. `"class"` (default) uses the fixed per-class tables above and honors `orb_overrides`. `"moiety"` instead sums each body's half-orb and scales by the aspect's multiplier — see `calculate_aspects` below for the formula and an example. Under `"moiety"`, `orb_overrides` takes a different two-knob shape instead: `{"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}`.
+- `orb_model` (string, optional): Orb resolution model. `"class"` (default) uses the fixed per-class tables above and honors `orb_overrides`. `"moiety"` instead sums each body's half-orb and scales by the aspect's multiplier — see `calculate_aspects` below for the formula and an example. Under `"moiety"`, `orb_overrides` takes a different two-knob shape instead: `{"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}`. See [Orb Models](#orb-models) for moiety provenance and why sextile stays a major aspect.
 
 **Returns:**
 - `person1_chart`: Complete birth chart for person 1
@@ -159,7 +159,7 @@ Calculate natal chart aspects for a given datetime and coordinates. Returns plan
 - `include_south_node` (boolean, optional): Include South Node in aspect calculations. Default `false`.
 - `bodies` (array of strings, optional): Override the default aspect body list. Must be names known to the server.
 - `orb_overrides` (object, optional): Per-aspect orb overrides in degrees, e.g. `{"conjunction": 10}`. Also accepts a per-class shape, e.g. `{"angle": {"square": 4}}` or `{"derived": {"square": 2}}`, to move only the `angle` class (Ascendant/Midheaven/IC/Descendant) or `derived` class (Part of Fortune, Vertex) without touching `body`. `angle` defaults to 5/4/3/1.5/1.5/1 deg (conjunction-opposition/square/trine-sextile/semisextile-quincunx/semisquare-sesquiquadrate/quintile-biquintile); `derived` defaults to 3/2/2/1 deg (conjunction-opposition/square/trine-sextile/all minors) — both tighter than `body`'s defaults.
-- `orb_model` (string, optional): Orb resolution model. `"class"` (default) uses the fixed per-class tables above and honors `orb_overrides`. `"moiety"` instead sums each body's half-orb (per-body table, e.g. Sun 7.5°, Moon 6°, Ascendant 2.5°) and scales by the aspect's multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under `"moiety"`, `orb_overrides` takes a different two-knob shape instead: `{"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}` — `moieties` keys are body/point names, `multipliers` keys are aspect names.
+- `orb_model` (string, optional): Orb resolution model. `"class"` (default) uses the fixed per-class tables above and honors `orb_overrides`. `"moiety"` instead sums each body's half-orb (per-body table, e.g. Sun 7.5°, Moon 6°, Ascendant 2.5°) and scales by the aspect's multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under `"moiety"`, `orb_overrides` takes a different two-knob shape instead: `{"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}` — `moieties` keys are body/point names, `multipliers` keys are aspect names. See [Orb Models](#orb-models) for moiety provenance and why sextile stays a major aspect.
 - `house_system` (string, optional): House system code. Default `P`. See [House Systems](#house-systems).
 
 **Returns:**
@@ -190,6 +190,24 @@ If you need a body's aspect to IC or Descendant, derive it from the returned Mid
 | Biquintile | **not derivable** — no mirror partner (180° − 144° = 36° is not an aspect) |
 
 The orb and applying/separating values carry over unchanged; only the aspect label and its complementary body name change. This is lossless **because** the `angle` orb class (which governs ASC/MC/IC/DSC) is mirror-symmetric by construction — every mirror pair (conjunction/opposition, sextile/trine, semisextile/quincunx, semisquare/sesquiquadrate) carries an equal orb, enforced by a unit test. A body's IC or Descendant contact reached only via a quintile or biquintile to MC/ASC has no mirror partner and is simply absent from the derivation — there is no way to recover it from the returned aspect array.
+
+### Orb Models
+
+`orb_model` selects how a pair's allowed orb (the maximum separation from exact still counted as an aspect) is derived. There is **no single canonical orb table** in the astrological tradition — different schools and authors disagree, sometimes widely. This server offers two internally-consistent conventions rather than presenting either as definitive:
+
+- **`class` (default):** a fixed per-class orb table (`body`/`angle`/`derived`, shown per-tool above), independent of which two bodies are involved. `orb_overrides` in this mode takes the flat (`{"conjunction": 10}`) or per-class (`{"angle": {"square": 4}}`) shape.
+- **`moiety`:** each body/point has its own half-orb ("moiety"). A pair's orb is `(moietyA + moietyB) * multiplier[aspect]` — e.g. Sun (7.5°) conjunct Moon (6°) allows (7.5+6)×1.0 = 13.5°. `orb_overrides` in this mode takes a different two-knob shape instead of the `class`-mode shape: `{"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}` — `moieties` keys are body/point names, `multipliers` keys are aspect names.
+
+**Moiety provenance.** The per-body moieties are not uniformly sourced:
+
+| Tier | Bodies | Source |
+|---|---|---|
+| Sourced | Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn | Halved from a classical full-orb table (15/12/7/7/8/9/9°) |
+| Non-traditional | Uranus, Neptune, Pluto, Chiron, North/South Node, Lilith, Ceres, Pallas, Juno, Vesta, Ascendant, Midheaven, IC, Descendant, Part of Fortune, Vertex | Team-constructed by analogy to the sourced tier — there is no classical precedent for orbs on these bodies/points |
+
+Treat the non-traditional tier as an implementation choice, not an authoritative claim. IC/Descendant mirror Midheaven/Ascendant (2.5°) structurally, matching the `angle`-class mirror symmetry described in [Angle Aspects](#angle-aspects).
+
+**Aspect multipliers:** conjunction/opposition/trine/square = 1.0, sextile = 0.75, semisextile/semisquare/sesquiquadrate/quincunx/quintile/biquintile = 0.375. The sextile multiplier is *narrower*, not a demotion — sextile is still a major (Ptolemaic) aspect and is returned with `category: "major"` under either `orb_model`. The multiplier only scales its allowed orb; it does not move it into the minor-aspect set (semisextile, semisquare, sesquiquadrate, quincunx, quintile, biquintile), which are `category: "minor"` regardless of `orb_model`.
 
 ## House Systems
 

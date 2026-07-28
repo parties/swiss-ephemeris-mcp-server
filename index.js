@@ -165,7 +165,7 @@ class SwissEphemerisServer {
                 orb_model: {
                   type: 'string',
                   enum: ['class', 'moiety'],
-                  description: 'Orb resolution model for transit_aspects. "class" (default) uses the fixed per-class orb tables above and honors orb_overrides in its flat/per-class shape. "moiety" instead sums each body\'s half-orb (e.g. Sun 7.5°, Moon 6°) and scales by the aspect\'s multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under "moiety", orb_overrides takes a different two-knob shape instead: {"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}.',
+                  description: 'Orb resolution model for transit_aspects. "class" (default) uses the fixed per-class orb tables above and honors orb_overrides in its flat/per-class shape. "moiety" instead sums each body\'s half-orb (e.g. Sun 7.5°, Moon 6°) and scales by the aspect\'s multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under "moiety", orb_overrides takes a different two-knob shape instead: {"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}. There is no single canonical orb table — see calculate_aspects\' orb_model description (or README) for moiety provenance and why sextile stays a major aspect despite its narrower 0.75 multiplier.',
                 },
               },
               required: ['birth_datetime', 'latitude', 'longitude'],
@@ -255,7 +255,7 @@ class SwissEphemerisServer {
                 orb_model: {
                   type: 'string',
                   enum: ['class', 'moiety'],
-                  description: 'Orb resolution model. "class" (default) uses the fixed per-class orb tables above and honors orb_overrides in its flat/per-class shape. "moiety" instead sums each body\'s half-orb and scales by the aspect\'s multiplier — see calculate_aspects for the formula and an example. Under "moiety", orb_overrides takes a different two-knob shape instead: {"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}.',
+                  description: 'Orb resolution model. "class" (default) uses the fixed per-class orb tables above and honors orb_overrides in its flat/per-class shape. "moiety" instead sums each body\'s half-orb and scales by the aspect\'s multiplier — see calculate_aspects for the formula and an example. Under "moiety", orb_overrides takes a different two-knob shape instead: {"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}. There is no single canonical orb table — see calculate_aspects\' orb_model description (or README) for moiety provenance and why sextile stays a major aspect despite its narrower 0.75 multiplier.',
                 },
                 person1_house_system: {
                   type: 'string',
@@ -312,7 +312,7 @@ class SwissEphemerisServer {
                 orb_model: {
                   type: 'string',
                   enum: ['class', 'moiety'],
-                  description: 'Orb resolution model. "class" (default) uses the fixed per-class orb tables above and honors orb_overrides in its flat/per-class shape. "moiety" instead sums each body\'s half-orb (per-body table, e.g. Sun 7.5°, Moon 6°, Ascendant 2.5°) and scales by the aspect\'s multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under "moiety", orb_overrides takes a different two-knob shape instead: {"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}.',
+                  description: 'Orb resolution model. "class" (default) uses the fixed per-class orb tables above and honors orb_overrides in its flat/per-class shape. "moiety" instead sums each body\'s half-orb (per-body table, e.g. Sun 7.5°, Moon 6°, Ascendant 2.5°) and scales by the aspect\'s multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under "moiety", orb_overrides takes a different two-knob shape instead: {"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}. Provenance: there is no single canonical orb table in the tradition — the Sun..Saturn moieties are sourced (halved from a classical full-orb table), everything past Saturn plus angles and lots is a team-constructed, non-traditional convention (see README). Note sextile\'s 0.75 multiplier is a narrower orb, not a demotion: sextile is still returned with category "major" (it is a Ptolemaic aspect) under either orb_model.',
                 },
                 house_system: {
                   type: 'string',
