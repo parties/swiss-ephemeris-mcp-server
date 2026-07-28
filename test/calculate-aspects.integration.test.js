@@ -244,6 +244,44 @@ test('orb_model rejects an unknown value at the tool boundary', { skip: !HAS_SWE
   );
 });
 
+// SUP-176/T4: in moiety mode, orb_overrides takes the two-knob { moieties, multipliers }
+// shape. The flat/per-class shape is a class-mode-only shape and must be rejected in moiety
+// mode, and vice versa.
+test('orb_overrides moiety-shape override is accepted and applied at the tool boundary', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_aspects', {
+    ...REFERENCE_INPUT,
+    orb_model: 'moiety',
+    orb_overrides: { moieties: { Sun: 10 }, multipliers: { quincunx: 0.5 } },
+  });
+
+  assert.equal(result.settings_used.orb_model, 'moiety');
+  assert.deepEqual(result.settings_used.orb_overrides, { moieties: { Sun: 10 }, multipliers: { quincunx: 0.5 } });
+});
+
+test('orb_overrides rejects a class-shape override in moiety mode', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  await assert.rejects(
+    () => server.handleToolCall('calculate_aspects', {
+      ...REFERENCE_INPUT,
+      orb_model: 'moiety',
+      orb_overrides: { square: 2 },
+    }),
+    /Unknown aspect in orb_overrides/
+  );
+});
+
+test('orb_overrides rejects a moiety-shape override in class mode', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  await assert.rejects(
+    () => server.handleToolCall('calculate_aspects', {
+      ...REFERENCE_INPUT,
+      orb_overrides: { moieties: { Sun: 10 } },
+    }),
+    /Unknown aspect in orb_overrides/
+  );
+});
+
 // The point resolver in lib/aspects.js walks planets -> chart_points -> additional_points and
 // returns the first hit, which is only safe while those buckets share no key. Nothing in the
 // chart builder enforces that, so assert it against every fixture: a collision would make

@@ -19,6 +19,7 @@ import {
   calculateHouseOverlay,
   resolveChartPoint,
   toAspectBody,
+  invalidOrbOverrideKeys,
 } from '../lib/aspects.js';
 
 test('normalizeSeparation wraps around 0/360 seam (350 vs 10 -> sep 20, not 340)', () => {
@@ -490,4 +491,80 @@ test('orb_model "class" (default) is unaffected by the moiety resolver', () => {
 
   assert.deepEqual(explicitClass, defaulted);
   assert.equal(explicitClass[0].orb_allowed, 8, 'sanity: class-mode body/body conjunction orb is untouched');
+});
+
+// SUP-176/T4: in moiety mode, orb_overrides takes the two-knob shape
+// { moieties: {...}, multipliers: {...} } instead of the flat/per-class shape.
+test('orb_model "moiety": a moiety override widens a pair orb', () => {
+  const bodies = [
+    { name: 'Sun', longitude: 0, speed: 1 },
+    { name: 'Moon', longitude: 0, speed: 12 },
+  ];
+  const [match] = calculateNatalAspects(bodies, {
+    orbModel: 'moiety',
+    orbOverrides: { moieties: { Sun: 10 } },
+  });
+
+  assert.equal(match.aspect, 'conjunction');
+  assert.equal(match.orb_allowed, 16, '(10 + 6) * 1.0');
+});
+
+test('orb_model "moiety": a multiplier override changes a pair orb', () => {
+  const bodies = [
+    { name: 'Sun', longitude: 0, speed: 1 },
+    { name: 'Moon', longitude: 150, speed: 12 },
+  ];
+  const [match] = calculateNatalAspects(bodies, {
+    orbModel: 'moiety',
+    includeMinor: true,
+    orbOverrides: { multipliers: { quincunx: 0.5 } },
+  });
+
+  assert.equal(match.aspect, 'quincunx');
+  assert.equal(match.orb_allowed, 6.75, '(7.5 + 6) * 0.5');
+});
+
+test('orb_model "moiety": unset moieties/multipliers fall back to the default tables', () => {
+  const bodies = [
+    { name: 'Sun', longitude: 0, speed: 1 },
+    { name: 'Moon', longitude: 0, speed: 12 },
+  ];
+  const [match] = calculateNatalAspects(bodies, {
+    orbModel: 'moiety',
+    orbOverrides: { moieties: { Mars: 1 } },
+  });
+
+  assert.equal(match.orb_allowed, 13.5, 'Sun/Moon unaffected by a Mars-only override');
+});
+
+test('invalidOrbOverrideKeys: valid moiety-shape overrides are accepted in moiety mode', () => {
+  const invalid = invalidOrbOverrideKeys(
+    { moieties: { Sun: 8, Ascendant: 3 }, multipliers: { quincunx: 0.3, sextile: 0.5 } },
+    'moiety'
+  );
+  assert.deepEqual(invalid, []);
+});
+
+test('invalidOrbOverrideKeys: a class-shape override is rejected in moiety mode', () => {
+  const invalid = invalidOrbOverrideKeys({ square: 2 }, 'moiety');
+  assert.deepEqual(invalid, ['square']);
+
+  const invalidPerClass = invalidOrbOverrideKeys({ angle: { square: 4 } }, 'moiety');
+  assert.deepEqual(invalidPerClass, ['angle']);
+});
+
+test('invalidOrbOverrideKeys: a moiety-shape override is rejected in class mode', () => {
+  const invalid = invalidOrbOverrideKeys(
+    { moieties: { Sun: 8 }, multipliers: { quincunx: 0.3 } }
+    // orbModel defaults to 'class'
+  );
+  assert.deepEqual(invalid.sort(), ['moieties', 'multipliers']);
+});
+
+test('invalidOrbOverrideKeys: unknown body/aspect key rejected in moiety mode', () => {
+  const invalid = invalidOrbOverrideKeys(
+    { moieties: { NotABody: 1 }, multipliers: { notAnAspect: 0.5 } },
+    'moiety'
+  );
+  assert.deepEqual(invalid.sort(), ['NotABody', 'notAnAspect']);
 });

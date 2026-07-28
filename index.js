@@ -165,7 +165,7 @@ class SwissEphemerisServer {
                 orb_model: {
                   type: 'string',
                   enum: ['class', 'moiety'],
-                  description: 'Orb resolution model for transit_aspects. "class" (default) uses the fixed per-class orb tables above and honors orb_overrides. "moiety" instead sums each body\'s half-orb (e.g. Sun 7.5°, Moon 6°) and scales by the aspect\'s multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under "moiety", orb_overrides is ignored.',
+                  description: 'Orb resolution model for transit_aspects. "class" (default) uses the fixed per-class orb tables above and honors orb_overrides in its flat/per-class shape. "moiety" instead sums each body\'s half-orb (e.g. Sun 7.5°, Moon 6°) and scales by the aspect\'s multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under "moiety", orb_overrides takes a different two-knob shape instead: {"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}.',
                 },
               },
               required: ['birth_datetime', 'latitude', 'longitude'],
@@ -255,7 +255,7 @@ class SwissEphemerisServer {
                 orb_model: {
                   type: 'string',
                   enum: ['class', 'moiety'],
-                  description: 'Orb resolution model. "class" (default) uses the fixed per-class orb tables above and honors orb_overrides. "moiety" instead sums each body\'s half-orb and scales by the aspect\'s multiplier — see calculate_aspects for the formula and an example. Under "moiety", orb_overrides is ignored.',
+                  description: 'Orb resolution model. "class" (default) uses the fixed per-class orb tables above and honors orb_overrides in its flat/per-class shape. "moiety" instead sums each body\'s half-orb and scales by the aspect\'s multiplier — see calculate_aspects for the formula and an example. Under "moiety", orb_overrides takes a different two-knob shape instead: {"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}.',
                 },
                 person1_house_system: {
                   type: 'string',
@@ -312,7 +312,7 @@ class SwissEphemerisServer {
                 orb_model: {
                   type: 'string',
                   enum: ['class', 'moiety'],
-                  description: 'Orb resolution model. "class" (default) uses the fixed per-class orb tables above and honors orb_overrides. "moiety" instead sums each body\'s half-orb (per-body table, e.g. Sun 7.5°, Moon 6°, Ascendant 2.5°) and scales by the aspect\'s multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under "moiety", orb_overrides is ignored.',
+                  description: 'Orb resolution model. "class" (default) uses the fixed per-class orb tables above and honors orb_overrides in its flat/per-class shape. "moiety" instead sums each body\'s half-orb (per-body table, e.g. Sun 7.5°, Moon 6°, Ascendant 2.5°) and scales by the aspect\'s multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under "moiety", orb_overrides takes a different two-knob shape instead: {"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}.',
                 },
                 house_system: {
                   type: 'string',
@@ -588,6 +588,7 @@ class SwissEphemerisServer {
       includeSouthNode = false,
       bodies,
       orbOverrides = {},
+      orbModel = 'class',
     } = options;
 
     const knownBodies = new Set([...DEFAULT_ASPECT_BODIES, ...ANGLE_BODIES, 'South Node']);
@@ -600,7 +601,7 @@ class SwissEphemerisServer {
       }
     }
 
-    const invalidOrbKeys = invalidOrbOverrideKeys(orbOverrides);
+    const invalidOrbKeys = invalidOrbOverrideKeys(orbOverrides, orbModel);
     if (invalidOrbKeys.length) {
       throw new McpError(ErrorCode.InvalidParams, `Unknown aspect in orb_overrides: ${invalidOrbKeys[0]}`);
     }
@@ -961,7 +962,7 @@ class SwissEphemerisServer {
         }
 
         if (synastry_orb_overrides !== undefined) {
-          const invalidSynastryOrbKeys = invalidOrbOverrideKeys(synastry_orb_overrides);
+          const invalidSynastryOrbKeys = invalidOrbOverrideKeys(synastry_orb_overrides, synastry_orb_model);
           if (invalidSynastryOrbKeys.length) {
             throw new McpError(ErrorCode.InvalidParams, `Unknown aspect in orb_overrides: ${invalidSynastryOrbKeys[0]}`);
           }
