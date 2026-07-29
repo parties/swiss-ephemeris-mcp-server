@@ -4,6 +4,8 @@ import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { SwissEphemerisServer } from '../index.js';
+import { ANGLE_BODIES } from '../lib/aspects.js';
+import { DAY_CHART } from './fixtures/charts.js';
 
 if (!process.env.SE_EPHE_PATH) {
   process.env.SE_EPHE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../vendor/swisseph');
@@ -60,4 +62,27 @@ test('calculate_transits rejects a malformed orb_overrides value', { skip: !HAS_
     () => server.handleToolCall('calculate_transits', { ...BIRTH_INPUT, orb_overrides: 'nope' }),
     /orb_overrides must be an object/
   );
+});
+
+const DAY_CHART_INPUT = { birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude };
+
+test('calculate_transits include_angles excludes transiting angles from transit_aspects', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_transits', { ...DAY_CHART_INPUT, include_angles: true });
+
+  assert.ok(!result.transit_aspects.some((a) => ANGLE_BODIES.includes(a.transiting_body)));
+});
+
+test('calculate_transits include_angles still includes natal angles in transit_aspects', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_transits', { ...DAY_CHART_INPUT, include_angles: true });
+
+  assert.ok(result.transit_aspects.some((a) => ANGLE_BODIES.includes(a.natal_body)));
+});
+
+test('calculate_transits excludes transiting Ascendant even when explicitly requested via bodies', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_transits', { ...DAY_CHART_INPUT, bodies: ['Sun', 'Ascendant'] });
+
+  assert.ok(!result.transit_aspects.some((a) => a.transiting_body === 'Ascendant'));
 });
