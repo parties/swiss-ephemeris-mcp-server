@@ -1,27 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
 import { SwissEphemerisServer } from '../index.js';
+import { resolveEphePath, swetestAvailable } from './fixtures/ephe-path.js';
 
-const REAL_EPHE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../vendor/swisseph');
-
-function swetestAvailable() {
-  try {
-    execSync(`SE_EPHE_PATH=${REAL_EPHE_PATH} swetest -b12.04.1985 -ut23:20:50 -p0 -g, -head`, { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-const HAS_SWETEST = swetestAvailable();
+const REAL_EPHE_PATH = resolveEphePath({ pinned: true });
+const HAS_SWETEST = swetestAvailable(REAL_EPHE_PATH);
 
 const REFERENCE_INPUT = { datetime: '1985-04-12T23:20:50Z', latitude: 40.7128, longitude: -74.006 };
 
 test('calculate_planetary_positions resolves asteroid bodies (Chiron/Ceres/Pallas/Juno/Vesta) to real, non-zero positions', { skip: !HAS_SWETEST }, async () => {
-  if (!process.env.SE_EPHE_PATH) process.env.SE_EPHE_PATH = REAL_EPHE_PATH;
+  // Pinned unconditionally: this test's subject is the vendored files themselves, so an
+  // ambient SE_EPHE_PATH override (legitimate for the other integration tests) is not
+  // meaningful here and would defeat the point of the assertion below.
+  process.env.SE_EPHE_PATH = REAL_EPHE_PATH;
   const server = new SwissEphemerisServer();
   const result = await server.handleToolCall('calculate_planetary_positions', REFERENCE_INPUT);
 
