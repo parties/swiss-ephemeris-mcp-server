@@ -615,6 +615,24 @@ class SwissEphemerisServer {
       bodySet.add('South Node');
     }
 
+    // include_angles/include_south_node gate which bodies enter aspect matching, and that
+    // gate applies uniformly whether a body came from the default set or an explicit `bodies`
+    // array (SUP-224) - both the natal path (calculate_aspects) and the cross-chart path
+    // (calculate_transits/synastry) resolve bodies through here, so they can never disagree.
+    // DSC/IC are legitimate computed points but never enter aspect pair-matching - see
+    // ASPECTABLE_ANGLES - so they're dropped unconditionally, independent of include_angles.
+    const aspectableAngleSet = new Set(ASPECTABLE_ANGLES);
+    const nonAspectableAngleSet = new Set(ANGLE_BODIES.filter((b) => !aspectableAngleSet.has(b)));
+    for (const name of Array.from(bodySet)) {
+      if (name === 'South Node') {
+        if (!includeSouthNode) bodySet.delete(name);
+      } else if (nonAspectableAngleSet.has(name)) {
+        bodySet.delete(name);
+      } else if (aspectableAngleSet.has(name) && !includeAngles) {
+        bodySet.delete(name);
+      }
+    }
+
     const bodiesWithLonSpeed = [];
 
     for (const name of bodySet) {
@@ -674,8 +692,9 @@ class SwissEphemerisServer {
     // Angles and Part of Fortune are artifacts of the moment's location and time of day: the
     // transiting Ascendant sweeps the whole zodiac daily, so transit-side angle contacts change
     // minute to minute and mean nothing. include_angles adds angles to the natal side only.
-    // Filtered here (not via includeAngles) because an explicit `bodies` array bypasses the flag
-    // gating, which lives in calculateNatalAspects, not the cross-chart engine.
+    // This drop is unconditional (SUP-154) and sits *after* resolveAspectBodies's shared
+    // include_angles/include_south_node gate (SUP-224) - it is transit-side-only and must not
+    // be merged into that shared gate, which natal callers also go through.
     const angleSet = new Set(ANGLE_BODIES);
     const { bodiesWithLonSpeed: allTransitBodies } = this.resolveAspectBodies(transitChart, options);
     const transitBodies = allTransitBodies.filter((b) => !angleSet.has(b.name));
