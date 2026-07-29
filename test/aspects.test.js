@@ -112,17 +112,17 @@ test('includeMinor gating: false never returns minor aspects even at exact minor
   assert.ok(withMinor.some((a) => a.aspect === 'quintile'));
 });
 
-test('includeSouthNode gating: excludes from all aspects when false, includes when true', () => {
+// SUP-224: include_south_node gating moved to resolveAspectBodies (index.js) so the natal
+// and cross-chart callers share one gate. calculateNatalAspects trusts its input as-is now,
+// regardless of includeSouthNode.
+test('calculateNatalAspects applies no South Node gating - it trusts its input list as-is', () => {
   const bodies = [
     { name: 'A', longitude: 0, speed: 0 },
     { name: 'South Node', longitude: 0, speed: null }, // exact conjunction
   ];
 
-  const withoutSouthNode = calculateNatalAspects(bodies, { orbModel: 'class', includeSouthNode: false });
-  assert.ok(!withoutSouthNode.some((a) => a.body_a === 'South Node' || a.body_b === 'South Node'));
-
-  const withSouthNode = calculateNatalAspects(bodies, { orbModel: 'class', includeSouthNode: true });
-  assert.ok(withSouthNode.some((a) => a.body_a === 'South Node' || a.body_b === 'South Node'));
+  const aspects = calculateNatalAspects(bodies, { orbModel: 'class', includeSouthNode: false });
+  assert.ok(aspects.some((a) => a.body_a === 'South Node' || a.body_b === 'South Node'));
 });
 
 test('aspects are sorted by orb ascending', () => {
@@ -211,7 +211,11 @@ test('ASPECTABLE_ANGLES membership is pinned', () => {
   assert.deepEqual(ASPECTABLE_ANGLES, ['Ascendant', 'Midheaven', 'Part of Fortune']);
 });
 
-test('calculateNatalAspects never aspects DSC/IC even when explicitly present in the body list', () => {
+// SUP-224: the DSC/IC exclusion moved to resolveAspectBodies (index.js) - see
+// calculate-aspects.integration.test.js for the tool-boundary version of this assertion.
+// calculateNatalAspects itself has no body-name special-casing left; it aspects whatever
+// it's given.
+test('calculateNatalAspects has no DSC/IC special-casing - it trusts its input list as-is', () => {
   const bodies = [
     { name: 'Ascendant', longitude: 0, speed: null },
     { name: 'Descendant', longitude: 180, speed: null },
@@ -221,8 +225,8 @@ test('calculateNatalAspects never aspects DSC/IC even when explicitly present in
   const aspects = calculateNatalAspects(bodies, { includeAngles: true });
   const nonAspectable = new Set(['IC', 'Descendant']);
   assert.ok(
-    !aspects.some((a) => nonAspectable.has(a.body_a) || nonAspectable.has(a.body_b)),
-    'DSC/IC should never appear as an aspected body'
+    aspects.some((a) => nonAspectable.has(a.body_a) || nonAspectable.has(a.body_b)),
+    'IC/Descendant are aspected here because gating is the caller\'s responsibility now'
   );
 });
 

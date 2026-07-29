@@ -86,3 +86,42 @@ test('calculate_transits excludes transiting Ascendant even when explicitly requ
 
   assert.ok(!result.transit_aspects.some((a) => a.transiting_body === 'Ascendant'));
 });
+
+// SUP-224: resolveAspectBodies gates include_angles/include_south_node identically for the
+// natal path (calculate_aspects) and the cross-chart path (calculate_transits), including when
+// an explicit `bodies` array is passed - previously the explicit array bypassed the flags on
+// the cross-chart path only. Both must yield zero Ascendant/South Node rows here.
+test('calculate_aspects and calculate_transits agree on in-scope bodies for identical include_angles:false/include_south_node:false + explicit bodies', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const explicitBodies = ['Sun', 'Ascendant', 'South Node'];
+
+  const aspectsResult = await server.handleToolCall('calculate_aspects', {
+    datetime: DAY_CHART.datetime,
+    latitude: DAY_CHART.latitude,
+    longitude: DAY_CHART.longitude,
+    include_angles: false,
+    include_south_node: false,
+    bodies: explicitBodies,
+  });
+  const transitsResult = await server.handleToolCall('calculate_transits', {
+    ...DAY_CHART_INPUT,
+    include_angles: false,
+    include_south_node: false,
+    bodies: explicitBodies,
+  });
+
+  const gatedNames = new Set(['Ascendant', 'South Node']);
+
+  assert.equal(
+    aspectsResult.aspects.filter((a) => gatedNames.has(a.body_a) || gatedNames.has(a.body_b)).length,
+    0,
+    'calculate_aspects should yield 0 Ascendant/South Node rows'
+  );
+  assert.equal(
+    transitsResult.transit_aspects.filter(
+      (a) => gatedNames.has(a.transiting_body) || gatedNames.has(a.natal_body)
+    ).length,
+    0,
+    'calculate_transits should yield 0 Ascendant/South Node rows'
+  );
+});
