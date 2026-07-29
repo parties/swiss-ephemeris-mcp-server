@@ -146,7 +146,7 @@ class SwissEphemerisServer {
                 },
                 include_angles: {
                   type: 'boolean',
-                  description: 'Include chart angles (Ascendant, Midheaven, IC, Descendant, Part of Fortune) in transit_aspects. Default false.',
+                  description: 'Include the NATAL chart angles (Ascendant, Midheaven, IC, Descendant, Part of Fortune) in transit_aspects. Transiting angles are always excluded, even if requested via `bodies`: they are artifacts of the moment\'s location and time of day (the transiting Ascendant sweeps the whole zodiac daily), so transit-side angle contacts change minute to minute and carry no meaning. Default false.',
                 },
                 include_south_node: {
                   type: 'boolean',
@@ -155,7 +155,7 @@ class SwissEphemerisServer {
                 bodies: {
                   type: 'array',
                   items: { type: 'string' },
-                  description: 'Override the default body list for transit_aspects. Must be names known to the server.',
+                  description: 'Override the default body list for transit_aspects. Must be names known to the server. Angle bodies are always excluded from the transiting side, even if listed here.',
                 },
                 orb_overrides: {
                   type: 'object',
@@ -670,7 +670,15 @@ class SwissEphemerisServer {
     } = options;
 
     const { bodiesWithLonSpeed: natalBodies, requestedBodies } = this.resolveAspectBodies(natalChart, options);
-    const { bodiesWithLonSpeed: transitBodies } = this.resolveAspectBodies(transitChart, options);
+
+    // Angles and Part of Fortune are artifacts of the moment's location and time of day: the
+    // transiting Ascendant sweeps the whole zodiac daily, so transit-side angle contacts change
+    // minute to minute and mean nothing. include_angles adds angles to the natal side only.
+    // Filtered here (not via includeAngles) because an explicit `bodies` array bypasses the flag
+    // gating, which lives in calculateNatalAspects, not the cross-chart engine.
+    const angleSet = new Set(ANGLE_BODIES);
+    const { bodiesWithLonSpeed: allTransitBodies } = this.resolveAspectBodies(transitChart, options);
+    const transitBodies = allTransitBodies.filter((b) => !angleSet.has(b.name));
 
     const aspects = calculateCrossChartAspects(transitBodies, natalBodies, {
       includeMinor,
