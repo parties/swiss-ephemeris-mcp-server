@@ -1,26 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
 import { SwissEphemerisServer } from '../index.js';
 import { ASPECTABLE_ANGLES } from '../lib/aspects.js';
 import { DAY_CHART, PARTNER_CHART } from './fixtures/charts.js';
+import { resolveEphePath, swetestAvailable } from './fixtures/ephe-path.js';
 
-if (!process.env.SE_EPHE_PATH) {
-  process.env.SE_EPHE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../vendor/swisseph');
-}
-
-function swetestAvailable() {
-  try {
-    execSync(`SE_EPHE_PATH=${process.env.SE_EPHE_PATH} swetest -b12.04.1985 -ut23:20:50 -p0 -g, -head`, { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-const HAS_SWETEST = swetestAvailable();
+const EPHE_PATH = resolveEphePath();
+const HAS_SWETEST = swetestAvailable(EPHE_PATH);
 
 const PERSON1 = { person1_datetime: '1985-04-12T23:20:50Z', person1_latitude: 40.7128, person1_longitude: -74.006 };
 const PERSON2 = { person2_datetime: '1990-08-25T14:30:00Z', person2_latitude: 34.0522, person2_longitude: -118.2437 };

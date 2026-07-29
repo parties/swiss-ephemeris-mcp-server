@@ -1,25 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import path from 'node:path';
 import { SwissEphemerisServer } from '../index.js';
 import { DAY_CHART, NIGHT_CHART, SOUTHERN_CHART, houseOf } from './fixtures/charts.js';
+import { resolveEphePath, swetestAvailable } from './fixtures/ephe-path.js';
 
-if (!process.env.SE_EPHE_PATH) {
-  process.env.SE_EPHE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), '../vendor/swisseph');
-}
-
-function swetestAvailable() {
-  try {
-    execSync(`SE_EPHE_PATH=${process.env.SE_EPHE_PATH} swetest -b12.04.1985 -ut23:20:50 -p0 -g, -head`, { stdio: 'pipe' });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-const HAS_SWETEST = swetestAvailable();
+const EPHE_PATH = resolveEphePath();
+const HAS_SWETEST = swetestAvailable(EPHE_PATH);
 
 const norm = (deg) => (((deg % 360) + 360) % 360);
 const dayFormula = ({ asc, sun, moon }) => norm(asc + moon - sun);
