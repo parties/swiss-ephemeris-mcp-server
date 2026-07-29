@@ -84,16 +84,18 @@ test('computeApplying: exact-hit epsilon boundary -> null', () => {
   assert.notEqual(resolved, null);
 });
 
+// These fixtures use body names ('A', 'B', 'C') that aren't in MOIETIES, so they're pinned
+// to the class model explicitly - the moiety default can't resolve orbs for unknown names.
 test('orb_overrides changes qualifying pairs (tightening square drops a 5-degree-orb pair)', () => {
   const bodies = [
     { name: 'A', longitude: 0, speed: 0 },
     { name: 'B', longitude: 95, speed: 0 }, // 95 deg separation, square orb = 5
   ];
 
-  const withDefaultOrb = calculateNatalAspects(bodies, {});
+  const withDefaultOrb = calculateNatalAspects(bodies, { orbModel: 'class' });
   assert.ok(withDefaultOrb.some((a) => a.aspect === 'square'));
 
-  const withTightOrb = calculateNatalAspects(bodies, { orbOverrides: { square: 2 } });
+  const withTightOrb = calculateNatalAspects(bodies, { orbModel: 'class', orbOverrides: { square: 2 } });
   assert.ok(!withTightOrb.some((a) => a.aspect === 'square'));
 });
 
@@ -103,10 +105,10 @@ test('includeMinor gating: false never returns minor aspects even at exact minor
     { name: 'B', longitude: 72, speed: 0 }, // exact quintile
   ];
 
-  const withoutMinor = calculateNatalAspects(bodies, { includeMinor: false });
+  const withoutMinor = calculateNatalAspects(bodies, { orbModel: 'class', includeMinor: false });
   assert.ok(!withoutMinor.some((a) => a.aspect === 'quintile'));
 
-  const withMinor = calculateNatalAspects(bodies, { includeMinor: true });
+  const withMinor = calculateNatalAspects(bodies, { orbModel: 'class', includeMinor: true });
   assert.ok(withMinor.some((a) => a.aspect === 'quintile'));
 });
 
@@ -116,10 +118,10 @@ test('includeSouthNode gating: excludes from all aspects when false, includes wh
     { name: 'South Node', longitude: 0, speed: null }, // exact conjunction
   ];
 
-  const withoutSouthNode = calculateNatalAspects(bodies, { includeSouthNode: false });
+  const withoutSouthNode = calculateNatalAspects(bodies, { orbModel: 'class', includeSouthNode: false });
   assert.ok(!withoutSouthNode.some((a) => a.body_a === 'South Node' || a.body_b === 'South Node'));
 
-  const withSouthNode = calculateNatalAspects(bodies, { includeSouthNode: true });
+  const withSouthNode = calculateNatalAspects(bodies, { orbModel: 'class', includeSouthNode: true });
   assert.ok(withSouthNode.some((a) => a.body_a === 'South Node' || a.body_b === 'South Node'));
 });
 
@@ -129,7 +131,7 @@ test('aspects are sorted by orb ascending', () => {
     { name: 'B', longitude: 3, speed: 0 },
     { name: 'C', longitude: 61, speed: 0 },
   ];
-  const aspects = calculateNatalAspects(bodies, {});
+  const aspects = calculateNatalAspects(bodies, { orbModel: 'class' });
   for (let i = 1; i < aspects.length; i++) {
     assert.ok(aspects[i - 1].orb <= aspects[i].orb);
   }
@@ -271,6 +273,8 @@ test('every orb class ranks all majors wider than all minors', () => {
   }
 });
 
+// These orb-class tests exercise 'class'-model behavior specifically (per-class tables),
+// which still exists but is no longer the default - pinned explicitly.
 test('calculateNatalAspects: an angle/derived pair is held to the tighter side even though a same-separation body pair still matches', () => {
   const bodyPair = [
     { name: 'Sun', longitude: 0, speed: 1 },
@@ -281,11 +285,11 @@ test('calculateNatalAspects: an angle/derived pair is held to the tighter side e
     { name: 'Part of Fortune', longitude: 95, speed: null }, // derived square = 2; min(4,2)=2, orb 5 exceeds
   ];
 
-  const [bodyAspect] = calculateNatalAspects(bodyPair, { includeAngles: true });
+  const [bodyAspect] = calculateNatalAspects(bodyPair, { orbModel: 'class', includeAngles: true });
   assert.equal(bodyAspect.aspect, 'square');
   assert.equal(bodyAspect.orb_allowed, DEFAULT_ORBS.square);
 
-  assert.equal(calculateNatalAspects(pointPair, { includeAngles: true }).length, 0);
+  assert.equal(calculateNatalAspects(pointPair, { orbModel: 'class', includeAngles: true }).length, 0);
 });
 
 test('calculateNatalAspects: an angle/derived pair within the tighter derived orb still matches', () => {
@@ -293,7 +297,7 @@ test('calculateNatalAspects: an angle/derived pair within the tighter derived or
     { name: 'Ascendant', longitude: 0, speed: null }, // angle square = 4
     { name: 'Part of Fortune', longitude: 92, speed: null }, // square, orb 2 - within derived's 2
   ];
-  const [pointAspect] = calculateNatalAspects(pointPair, { includeAngles: true });
+  const [pointAspect] = calculateNatalAspects(pointPair, { orbModel: 'class', includeAngles: true });
   assert.equal(pointAspect.aspect, 'square');
   assert.equal(pointAspect.orb_allowed, 2);
 });
@@ -303,7 +307,7 @@ test('a pair spanning body and derived classes is held to the stricter (derived)
     { name: 'Pluto', longitude: 0, speed: 0 }, // body square = 8
     { name: 'Part of Fortune', longitude: 92, speed: null }, // derived square = 2, orb 2 - exactly at boundary
   ];
-  const [aspect] = calculateNatalAspects(mixedPair, { includeAngles: true });
+  const [aspect] = calculateNatalAspects(mixedPair, { orbModel: 'class', includeAngles: true });
   assert.equal(aspect.orb_allowed, 2);
 
   const justOutside = calculateNatalAspects(
@@ -311,7 +315,7 @@ test('a pair spanning body and derived classes is held to the stricter (derived)
       { name: 'Pluto', longitude: 0, speed: 0 },
       { name: 'Part of Fortune', longitude: 92.01, speed: null },
     ],
-    { includeAngles: true }
+    { orbModel: 'class', includeAngles: true }
   );
   assert.equal(justOutside.length, 0, 'a body-class partner cannot widen a derived-class orb past 2 deg');
 });
@@ -325,7 +329,7 @@ test('orb_overrides per-class shape tightens derived without touching body', () 
     { name: 'Ascendant', longitude: 0, speed: null }, // angle square = 4, untouched
     { name: 'Part of Fortune', longitude: 91.5, speed: null }, // derived square overridden to 1
   ];
-  const opts = { orbOverrides: { derived: { square: 1 } }, includeAngles: true };
+  const opts = { orbModel: 'class', orbOverrides: { derived: { square: 1 } }, includeAngles: true };
 
   assert.ok(calculateNatalAspects(bodyPair, opts).some((a) => a.aspect === 'square'), 'body class is unaffected by a derived-only override');
   assert.ok(!calculateNatalAspects(pointPair, opts).some((a) => a.aspect === 'square'), 'derived class picks up its own override, tightening the min below 1.5');
@@ -340,9 +344,9 @@ test('orb_overrides per-class shape loosens derived without touching body', () =
     { name: 'Ascendant', longitude: 0, speed: null }, // angle square = 4
     { name: 'Part of Fortune', longitude: 94, speed: null }, // derived square default = 2
   ];
-  const opts = { orbOverrides: { derived: { square: 5 } }, includeAngles: true };
+  const opts = { orbModel: 'class', orbOverrides: { derived: { square: 5 } }, includeAngles: true };
 
-  assert.ok(!calculateNatalAspects(pointPair, { includeAngles: true }).some((a) => a.aspect === 'square'), 'sanity: 4-deg orb exceeds min(angle 4, derived 2) = 2');
+  assert.ok(!calculateNatalAspects(pointPair, { orbModel: 'class', includeAngles: true }).some((a) => a.aspect === 'square'), 'sanity: 4-deg orb exceeds min(angle 4, derived 2) = 2');
   assert.ok(calculateNatalAspects(pointPair, opts).some((a) => a.aspect === 'square'), 'derived class picks up the loosened override, raising the min to angle\'s 4');
   assert.ok(calculateNatalAspects(bodyPair, opts).some((a) => a.aspect === 'square'), 'body class still matches its own (untouched) default');
 });
@@ -357,7 +361,7 @@ test('orb_overrides flat shape still applies globally across both classes', () =
     { name: 'Part of Fortune', longitude: 95, speed: null },
   ];
 
-  const tightened = { orbOverrides: { square: 2 }, includeAngles: true };
+  const tightened = { orbModel: 'class', orbOverrides: { square: 2 }, includeAngles: true };
   assert.ok(!calculateNatalAspects(bodies, tightened).some((a) => a.aspect === 'square'));
   assert.ok(!calculateNatalAspects(points, tightened).some((a) => a.aspect === 'square'));
 });
@@ -393,10 +397,9 @@ test('ASPECT_MULTIPLIERS: exact keys and values', () => {
   });
 });
 
-// SUP-173/T1: orb_model is a seam only - 'class' (default) must behave exactly as before,
-// and 'moiety' is reserved for SUP-169/T3 and must fail loudly rather than silently
-// falling back to class orbs or matching nothing.
-test('orb_model seam: unset and explicit "class" produce byte-identical natal aspect output', () => {
+// SUP-179/T3: orb_model default flipped to 'moiety'. Unset must behave exactly as explicit
+// 'moiety', and 'class' remains fully supported as an explicit opt-in.
+test('orb_model seam: unset and explicit "moiety" produce byte-identical natal aspect output', () => {
   const bodies = [
     { name: 'Sun', longitude: 0, speed: 1 },
     { name: 'Moon', longitude: 90, speed: 12 },
@@ -405,20 +408,20 @@ test('orb_model seam: unset and explicit "class" produce byte-identical natal as
   ];
 
   const unset = calculateNatalAspects(bodies, { includeAngles: true });
-  const explicitClass = calculateNatalAspects(bodies, { includeAngles: true, orbModel: 'class' });
+  const explicitMoiety = calculateNatalAspects(bodies, { includeAngles: true, orbModel: 'moiety' });
 
-  assert.deepEqual(unset, explicitClass);
+  assert.deepEqual(unset, explicitMoiety);
   assert.ok(unset.length > 0, 'sanity: this fixture should actually produce aspects');
 });
 
-test('orb_model seam: unset and explicit "class" produce byte-identical cross-chart aspect output', () => {
+test('orb_model seam: unset and explicit "moiety" produce byte-identical cross-chart aspect output', () => {
   const bodiesA = [{ name: 'Sun', longitude: 0, speed: 1 }];
   const bodiesB = [{ name: 'Moon', longitude: 90, speed: 12 }];
 
   const unset = calculateCrossChartAspects(bodiesA, bodiesB, {});
-  const explicitClass = calculateCrossChartAspects(bodiesA, bodiesB, { orbModel: 'class' });
+  const explicitMoiety = calculateCrossChartAspects(bodiesA, bodiesB, { orbModel: 'moiety' });
 
-  assert.deepEqual(unset, explicitClass);
+  assert.deepEqual(unset, explicitMoiety);
   assert.ok(unset.length > 0, 'sanity: this fixture should actually produce aspects');
 });
 
@@ -481,15 +484,25 @@ test('orb_model "moiety": Sun-Moon sextile pair orb uses the 0.75 multiplier -> 
   assert.equal(match.orb_allowed, 10.125);
 });
 
-test('orb_model "class" (default) is unaffected by the moiety resolver', () => {
+test('orb_model "moiety" (default) is unaffected by explicitly requesting it', () => {
+  const bodies = [
+    { name: 'Sun', longitude: 0, speed: 1 },
+    { name: 'Moon', longitude: 0, speed: 12 },
+  ];
+  const explicitMoiety = calculateNatalAspects(bodies, { orbModel: 'moiety' });
+  const defaulted = calculateNatalAspects(bodies);
+
+  assert.deepEqual(explicitMoiety, defaulted);
+  assert.equal(explicitMoiety[0].orb_allowed, 13.5, 'sanity: moiety-mode Sun-Moon conjunction orb is (7.5+6)*1.0');
+});
+
+test('orb_model "class" is unaffected by the moiety resolver', () => {
   const bodies = [
     { name: 'Sun', longitude: 0, speed: 1 },
     { name: 'Moon', longitude: 0, speed: 12 },
   ];
   const explicitClass = calculateNatalAspects(bodies, { orbModel: 'class' });
-  const defaulted = calculateNatalAspects(bodies);
 
-  assert.deepEqual(explicitClass, defaulted);
   assert.equal(explicitClass[0].orb_allowed, 8, 'sanity: class-mode body/body conjunction orb is untouched');
 });
 
@@ -555,8 +568,8 @@ test('invalidOrbOverrideKeys: a class-shape override is rejected in moiety mode'
 
 test('invalidOrbOverrideKeys: a moiety-shape override is rejected in class mode', () => {
   const invalid = invalidOrbOverrideKeys(
-    { moieties: { Sun: 8 }, multipliers: { quincunx: 0.3 } }
-    // orbModel defaults to 'class'
+    { moieties: { Sun: 8 }, multipliers: { quincunx: 0.3 } },
+    'class'
   );
   assert.deepEqual(invalid.sort(), ['moieties', 'multipliers']);
 });
