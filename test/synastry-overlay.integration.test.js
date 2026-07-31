@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SwissEphemerisServer } from '../index.js';
-import { ASPECTABLE_ANGLES } from '../lib/aspects.js';
+import { ASPECTABLE_ANGLES, resolveChartPoint } from '../lib/aspects.js';
 import { DAY_CHART, PARTNER_CHART } from './fixtures/charts.js';
 import { resolveEphePath, swetestAvailable } from './fixtures/ephe-path.js';
 
@@ -148,4 +148,78 @@ test('calculate_synastry include_angles: derived-class orb drops wide Fortune co
   );
 
   assert.equal(fortuneRows.length, 3, 'exactly three Fortune contacts survive the tighter derived-class orb for this fixture pair (IC excluded, SUP-159)');
+});
+
+// SUP-265: angle_aspects rows previously carried only person1_point/person2_point (names),
+// with no resolved longitude/sign/degree - unlike synastry_aspects, which always has both
+// positions. Every row's position should byte-match the point as it appears in the
+// returned person1_chart/person2_chart, however that point is bucketed internally.
+test('calculate_synastry include_angles: angle_aspects rows carry person1_position/person2_position', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_synastry', {
+    person1_datetime: DAY_CHART.datetime,
+    person1_latitude: DAY_CHART.latitude,
+    person1_longitude: DAY_CHART.longitude,
+    person2_datetime: PARTNER_CHART.datetime,
+    person2_latitude: PARTNER_CHART.latitude,
+    person2_longitude: PARTNER_CHART.longitude,
+    include_angles: true,
+  });
+
+  assert.ok(result.angle_aspects.length > 0, 'expect at least one angle contact for this pair');
+
+  for (const row of result.angle_aspects) {
+    const expectedP1 = resolveChartPoint(result.person1_chart, row.person1_point);
+    const expectedP2 = resolveChartPoint(result.person2_chart, row.person2_point);
+    assert.deepEqual(
+      row.person1_position,
+      { longitude: expectedP1.longitude, sign: expectedP1.sign, degree: expectedP1.degree },
+      `person1_position should match the resolved ${row.person1_point} point`
+    );
+    assert.deepEqual(
+      row.person2_position,
+      { longitude: expectedP2.longitude, sign: expectedP2.sign, degree: expectedP2.degree },
+      `person2_position should match the resolved ${row.person2_point} point`
+    );
+  }
+
+  const fortuneRow = result.angle_aspects.find(
+    (a) => a.person1_point === 'Part of Fortune' || a.person2_point === 'Part of Fortune'
+  );
+  assert.ok(fortuneRow, 'expect at least one Part of Fortune contact for this pair');
+  const fortunePosition = fortuneRow.person1_point === 'Part of Fortune'
+    ? fortuneRow.person1_position
+    : fortuneRow.person2_position;
+  assert.equal(typeof fortunePosition.sign, 'string');
+  assert.ok(Number.isFinite(fortunePosition.degree));
+});
+
+// SUP-265: house_overlay previously only ever carried the 10 SYNASTRY_BODIES planets, so
+// Part of Fortune / Ascendant / Midheaven house placement was unreachable from synastry
+// output even though every one of those points is already computed on both charts.
+test('calculate_synastry house_overlay covers Part of Fortune, Ascendant, Midheaven in both directions and excludes Descendant/IC', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_synastry', {
+    person1_datetime: DAY_CHART.datetime,
+    person1_latitude: DAY_CHART.latitude,
+    person1_longitude: DAY_CHART.longitude,
+    person2_datetime: PARTNER_CHART.datetime,
+    person2_latitude: PARTNER_CHART.latitude,
+    person2_longitude: PARTNER_CHART.longitude,
+  });
+
+  const overlayBodies = [
+    'Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto',
+    'Ascendant', 'Midheaven', 'Part of Fortune',
+  ];
+
+  for (const direction of ['person1_planets_in_person2_houses', 'person2_planets_in_person1_houses']) {
+    for (const body of overlayBodies) {
+      const house = result.house_overlay[direction][body];
+      assert.ok(Number.isInteger(house) && house >= 1 && house <= 12, `${direction}.${body} should land in a 1-12 house`);
+    }
+    for (const excluded of ['Descendant', 'IC']) {
+      assert.equal(result.house_overlay[direction][excluded], undefined, `${direction} should not include ${excluded}`);
+    }
+  }
 });
