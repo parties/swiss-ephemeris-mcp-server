@@ -29,6 +29,8 @@ import {
   calculateHouseOverlay,
   findHouseForLongitude,
   toAspectBody,
+  toPointPosition,
+  resolveChartPoint,
   invalidOrbOverrideKeys,
   ORB_MODELS,
 } from './lib/aspects.js';
@@ -40,6 +42,11 @@ function validateOrbModel(orbModel) {
 }
 
 const SYNASTRY_BODIES = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
+
+// Synastry overlay set: the 10 planets plus the aspectable angles (Ascendant, Midheaven,
+// Part of Fortune). Descendant/IC are excluded - they're exact mirrors of ASC/MC for house
+// placement and the codebase already treats them as non-first-class (ASPECTABLE_ANGLES).
+const SYNASTRY_OVERLAY_BODIES = [...SYNASTRY_BODIES, ...ASPECTABLE_ANGLES];
 
 // Falls back to the vendor/ dir shipped alongside this file (works both in the
 // Docker image, where it's copied to /app/vendor/swisseph, and in local/npx
@@ -790,6 +797,8 @@ class SwissEphemerisServer {
       orb: a.orb.toFixed(2),
       exact_angle: a.separation.toFixed(2),
       applying: a.applying,
+      person1_position: toPointPosition(person1Chart, a.body_a),
+      person2_position: toPointPosition(person2Chart, a.body_b),
     }));
   }
 
@@ -1052,13 +1061,13 @@ class SwissEphemerisServer {
           orbModel: synastry_orb_model,
         });
 
-        // House overlay: which of the other person's houses each planet falls into
-        const person1PlanetBodies = SYNASTRY_BODIES
-          .filter((n) => person1NatalChart.planets[n])
-          .map((n) => ({ name: n, longitude: person1NatalChart.planets[n].longitude }));
-        const person2PlanetBodies = SYNASTRY_BODIES
-          .filter((n) => person2NatalChart.planets[n])
-          .map((n) => ({ name: n, longitude: person2NatalChart.planets[n].longitude }));
+        // House overlay: which of the other person's houses each planet/angle falls into
+        const person1PlanetBodies = SYNASTRY_OVERLAY_BODIES
+          .filter((n) => resolveChartPoint(person1NatalChart, n))
+          .map((n) => ({ name: n, longitude: resolveChartPoint(person1NatalChart, n).longitude }));
+        const person2PlanetBodies = SYNASTRY_OVERLAY_BODIES
+          .filter((n) => resolveChartPoint(person2NatalChart, n))
+          .map((n) => ({ name: n, longitude: resolveChartPoint(person2NatalChart, n).longitude }));
 
         const houseOverlay = {
           person1_planets_in_person2_houses: calculateHouseOverlay(person1PlanetBodies, person2NatalChart.houses),
