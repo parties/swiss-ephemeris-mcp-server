@@ -142,8 +142,8 @@ Calculate synastry chart between two people for relationship compatibility analy
 - `person1_chart`: Complete birth chart for person 1
 - `person2_chart`: Complete birth chart for person 2
 - `synastry_aspects`: Array of planetary aspects between the charts
-- `house_overlay`: `{ person1_planets_in_person2_houses, person2_planets_in_person1_houses }` — for each of the 10 major bodies, which house (1-12) of the other person's chart it falls into
-- `angle_aspects` (only present when `include_angles` is `true`): Array of aspects involving Ascendant/Midheaven/Part of Fortune across the two charts, same shape as `synastry_aspects` but with `person1_point`/`person2_point` instead of `_planet`. IC and Descendant are not separately aspected — see [Angle Aspects](#angle-aspects) for why, and how to derive their contacts from this array.
+- `house_overlay`: `{ person1_planets_in_person2_houses, person2_planets_in_person1_houses }` — for each of the 10 major bodies plus Ascendant, Midheaven, and Part of Fortune (13 points total; Descendant and IC are not included), which house (1-12) of the other person's chart it falls into
+- `angle_aspects` (only present when `include_angles` is `true`): Array of aspects involving Ascendant/Midheaven/Part of Fortune across the two charts. Same shape as `synastry_aspects` — `aspect`, `category`, `orb`, `exact_angle`, `applying`, and `person1_position`/`person2_position` (`{longitude, sign, degree}`) — but with `person1_point`/`person2_point` naming the point instead of `person1_planet`/`person2_planet`. IC and Descendant are not separately aspected — see [Angle Aspects](#angle-aspects) for why, and how to derive their contacts from this array.
 - `calculation_time`: Timestamp of calculation
 
 ### `calculate_aspects`
