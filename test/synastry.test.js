@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { calculateNatalAspects, calculateCrossChartAspects, DEFAULT_ORBS } from '../lib/aspects.js';
+import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { SwissEphemerisServer } from '../index.js';
 
 test('calculateCrossChartAspects matches calculateNatalAspects orb table for the same body pair', () => {
@@ -73,4 +74,47 @@ test('calculate_synastry preserves output shape fields (person1_planet, person2_
   assert.equal(aspect.person2_planet, 'Sun');
   assert.deepEqual(aspect.person1_position, { longitude: 0, sign: 'Aries', degree: 0 });
   assert.deepEqual(aspect.person2_position, { longitude: 3, sign: 'Aries', degree: 3 });
+});
+
+test('calculateSynastryAspects defaults to the full 17-body list when bodies is not set (SUP-263)', () => {
+  const server = new SwissEphemerisServer();
+  const person1Planets = {
+    Sun: { longitude: 0, sign: 'Aries', degree: 0, speed: 1 },
+    Juno: { longitude: 10, sign: 'Aries', degree: 10, speed: 0.1 },
+  };
+  const person2Planets = {
+    Sun: { longitude: 90, sign: 'Cancer', degree: 0, speed: 1 },
+    Juno: { longitude: 10, sign: 'Aries', degree: 10, speed: 0.1 },
+  };
+
+  const aspects = server.calculateSynastryAspects(person1Planets, person2Planets);
+
+  const junoJuno = aspects.find((a) => a.person1_planet === 'Juno' && a.person2_planet === 'Juno');
+  assert.ok(junoJuno, 'Juno-Juno conjunction should be present under the default 17-body list');
+  assert.equal(junoJuno.aspect, 'conjunction');
+});
+
+test('calculateSynastryAspects bodies override restricts the grid to just those bodies', () => {
+  const server = new SwissEphemerisServer();
+  const person1Planets = {
+    Sun: { longitude: 0, sign: 'Aries', degree: 0, speed: 1 },
+    Juno: { longitude: 10, sign: 'Aries', degree: 10, speed: 0.1 },
+  };
+  const person2Planets = {
+    Sun: { longitude: 3, sign: 'Aries', degree: 3, speed: 1 },
+    Juno: { longitude: 10, sign: 'Aries', degree: 10, speed: 0.1 },
+  };
+
+  const aspects = server.calculateSynastryAspects(person1Planets, person2Planets, { bodies: ['Sun'] });
+
+  assert.ok(aspects.length > 0);
+  assert.ok(aspects.every((a) => a.person1_planet === 'Sun' && a.person2_planet === 'Sun'));
+});
+
+test('calculateSynastryAspects throws McpError for an unknown body in bodies', () => {
+  const server = new SwissEphemerisServer();
+  assert.throws(
+    () => server.calculateSynastryAspects({}, {}, { bodies: ['NotARealBody'] }),
+    (err) => err instanceof McpError && /Unknown body: NotARealBody/.test(err.message)
+  );
 });

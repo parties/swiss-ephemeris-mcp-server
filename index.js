@@ -41,6 +41,8 @@ function validateOrbModel(orbModel) {
   }
 }
 
+// House-overlay only (SUP-263) - the aspect grid and angle-aspect planet side use the wider
+// DEFAULT_ASPECT_BODIES list instead; overlaying 17 bodies into 12 houses is noisier.
 const SYNASTRY_BODIES = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
 
 // Synastry overlay set: the 10 planets plus the aspectable angles (Ascendant, Midheaven,
@@ -253,6 +255,11 @@ class SwissEphemerisServer {
                 include_angles: {
                   type: 'boolean',
                   description: 'Include cross-chart aspects to chart angles (Ascendant, Midheaven, IC, Descendant, Part of Fortune) in addition to planet-planet aspects. Default false.',
+                },
+                bodies: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Override the default body list (defaults to the full 17-body list: Sun..Pluto, North Node, Lilith, Chiron, Ceres, Pallas, Juno, Vesta). Applies to the aspect grid and angle-aspect planet side only — the house overlay always uses the 10 traditional planets.',
                 },
                 orb_overrides: {
                   type: 'object',
@@ -739,8 +746,25 @@ class SwissEphemerisServer {
     };
   }
 
+  // Synastry-specific body list resolution, scoped to DEFAULT_ASPECT_BODIES only - unlike
+  // resolveAspectBodies, ANGLE_BODIES/South Node don't apply here: synastry's planet-side
+  // bodies come from a plain `planets` dict (not a full ephemeris result), and angle contacts
+  // already go through the separate ASPECTABLE_ANGLES path gated by include_angles.
+  resolveSynastryBodies(bodies) {
+    const requestedBodies = Array.isArray(bodies) && bodies.length ? bodies : DEFAULT_ASPECT_BODIES;
+    const knownBodies = new Set(DEFAULT_ASPECT_BODIES);
+    for (const b of requestedBodies) {
+      if (!knownBodies.has(b)) {
+        throw new McpError(ErrorCode.InvalidParams, `Unknown body: ${b}`);
+      }
+    }
+    return requestedBodies;
+  }
+
   calculateSynastryAspects(person1Planets, person2Planets, options = {}) {
-    const toBodiesWithLonSpeed = (planets) => SYNASTRY_BODIES
+    const requestedBodies = this.resolveSynastryBodies(options.bodies);
+
+    const toBodiesWithLonSpeed = (planets) => requestedBodies
       .filter((name) => planets[name])
       .map((name) => ({ name, longitude: planets[name].longitude, speed: planets[name].speed ?? null }));
 
@@ -779,7 +803,9 @@ class SwissEphemerisServer {
       .map((name) => toAspectBody(chart, name))
       .filter(Boolean);
 
-    const toPlanetBodies = (chart) => toBodies(chart, SYNASTRY_BODIES);
+    const requestedBodies = this.resolveSynastryBodies(options.bodies);
+
+    const toPlanetBodies = (chart) => toBodies(chart, requestedBodies);
     const toAngleBodies = (chart) => toBodies(chart, ASPECTABLE_ANGLES);
 
     const person1Planets = toPlanetBodies(person1Chart);
@@ -989,7 +1015,7 @@ class SwissEphemerisServer {
         };
 
       case 'calculate_synastry':
-        const { person1_datetime, person1_latitude, person1_longitude, person2_datetime, person2_latitude, person2_longitude, include_minor: synastry_include_minor, include_angles: synastry_include_angles, orb_overrides: synastry_orb_overrides, orb_model: synastry_orb_model, person1_house_system, person2_house_system } = args;
+        const { person1_datetime, person1_latitude, person1_longitude, person2_datetime, person2_latitude, person2_longitude, include_minor: synastry_include_minor, include_angles: synastry_include_angles, bodies: synastry_bodies, orb_overrides: synastry_orb_overrides, orb_model: synastry_orb_model, person1_house_system, person2_house_system } = args;
 
         if (synastry_include_minor !== undefined && typeof synastry_include_minor !== 'boolean') {
           throw new McpError(ErrorCode.InvalidParams, 'include_minor must be a boolean');
@@ -997,6 +1023,10 @@ class SwissEphemerisServer {
 
         if (synastry_include_angles !== undefined && typeof synastry_include_angles !== 'boolean') {
           throw new McpError(ErrorCode.InvalidParams, 'include_angles must be a boolean');
+        }
+
+        if (synastry_bodies !== undefined && (!Array.isArray(synastry_bodies) || !synastry_bodies.every((b) => typeof b === 'string'))) {
+          throw new McpError(ErrorCode.InvalidParams, 'bodies must be an array of strings');
         }
 
         if (synastry_orb_overrides !== undefined && (typeof synastry_orb_overrides !== 'object' || synastry_orb_overrides === null || Array.isArray(synastry_orb_overrides))) {
@@ -1063,6 +1093,7 @@ class SwissEphemerisServer {
         // Calculate aspects between the two charts
         const aspects = this.calculateSynastryAspects(person1NatalChart.planets, person2NatalChart.planets, {
           includeMinor: synastry_include_minor,
+          bodies: synastry_bodies,
           orbOverrides: synastry_orb_overrides,
           orbModel: synastry_orb_model,
         });
@@ -1085,6 +1116,7 @@ class SwissEphemerisServer {
         if (synastry_include_angles) {
           angleAspects = this.calculateSynastryAngleAspects(person1NatalChart, person2NatalChart, {
             includeMinor: synastry_include_minor,
+            bodies: synastry_bodies,
             orbOverrides: synastry_orb_overrides,
             orbModel: synastry_orb_model,
           });
