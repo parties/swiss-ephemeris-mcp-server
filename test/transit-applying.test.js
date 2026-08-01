@@ -55,12 +55,16 @@ test('transit applying — changing natal speed does not change applying', () =>
   const { aspects: a2 } = runTransits(transit, [{ name: 'Moon', longitude: 15, speed: -2.5 }]);
   const { aspects: a3 } = runTransits(transit, [{ name: 'Moon', longitude: 15, speed: 5.0 }]);
 
-  const applying1 = a1.find((a) => a.natal_body === 'Moon')?.applying;
-  const applying2 = a2.find((a) => a.natal_body === 'Moon')?.applying;
-  const applying3 = a3.find((a) => a.natal_body === 'Moon')?.applying;
+  const row1 = a1.find((a) => a.natal_body === 'Moon');
+  const row2 = a2.find((a) => a.natal_body === 'Moon');
+  const row3 = a3.find((a) => a.natal_body === 'Moon');
+  // Guard against a vacuous pass: if the aspect stopped matching, `.applying` would be
+  // undefined in all three runs and a bare equality check would pass for the wrong reason.
+  assert.ok(row1 && row2 && row3, 'Sun-Moon conjunction expected in all three runs');
+  assert.equal(typeof row1.applying, 'boolean', 'applying must resolve to a real boolean here');
 
-  assert.equal(applying1, applying2, 'flipping natal speed must not change applying');
-  assert.equal(applying1, applying3, 'scaling natal speed must not change applying');
+  assert.equal(row1.applying, row2.applying, 'flipping natal speed must not change applying');
+  assert.equal(row1.applying, row3.applying, 'scaling natal speed must not change applying');
 });
 
 // --- Angle/PoF null-preservation ---
@@ -86,6 +90,10 @@ test('transit applying — transiting body vs natal Ascendant gives applying:nul
   const ascRow = aspects.find((a) => a.natal_body === 'Ascendant');
   assert.ok(ascRow, 'aspect to natal Ascendant expected');
   assert.equal(ascRow.applying, null, 'applying must be null for a static natal point');
+
+  const mcRow = aspects.find((a) => a.natal_body === 'Midheaven');
+  assert.ok(mcRow, 'aspect to natal Midheaven expected');
+  assert.equal(mcRow.applying, null, 'applying must be null for a static natal point');
 });
 
 test('transit applying — transiting body vs natal Part of Fortune gives applying:null', () => {
