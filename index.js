@@ -127,7 +127,7 @@ class SwissEphemerisServer {
           },
           {
             name: 'calculate_transits',
-            description: 'Calculate birth chart positions and current transits for comparison, including aspects from transiting bodies to the natal chart.',
+            description: 'Calculate birth chart positions and current transits for comparison, including aspects from transiting bodies to the natal chart. `applying` is computed from the transiting body\'s motion only; the natal position is treated as fixed.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -706,7 +706,13 @@ class SwissEphemerisServer {
     const { bodiesWithLonSpeed: allTransitBodies } = this.resolveAspectBodies(transitChart, options);
     const transitBodies = allTransitBodies.filter((b) => !angleSet.has(b.name));
 
-    const aspects = calculateCrossChartAspects(transitBodies, natalBodies, {
+    // Natal body is a frozen snapshot for transit purposes — only the transiting body's
+    // motion should drive `applying`. Zero natal speed here (never in lib/aspects.js),
+    // preserving null so angles/Part of Fortune keep applying: null. See lib/aspects.js:24-25
+    // for the sibling precedent (MOIETIES halving) of a comment guarding against "cleanup".
+    const frozenNatalBodies = natalBodies.map((b) => ({ ...b, speed: b.speed == null ? null : 0 }));
+
+    const aspects = calculateCrossChartAspects(transitBodies, frozenNatalBodies, {
       includeMinor,
       orbOverrides,
       orbModel,
