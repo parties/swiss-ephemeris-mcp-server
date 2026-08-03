@@ -210,20 +210,23 @@ test('calculate_synastry unknown body in bodies param throws InvalidParams', { s
   );
 });
 
-// Regression guard: house_overlay must stay on the 10 traditional planets regardless of the
-// `bodies` override - overlaying 17 bodies into 12 houses is noisier and was intentionally
-// excluded from this param (SUP-150/SUP-263).
-test('calculate_synastry house_overlay stays the 10 traditional planets even when bodies is overridden', { skip: !HAS_SWETEST }, async () => {
+// Regression guard: house_overlay's body list must stay fixed regardless of the `bodies`
+// override - overlaying the full 17-body list into 12 houses is noisier and was intentionally
+// excluded from this param (SUP-150/SUP-263). SUP-265 widened the fixed list itself from the 10
+// traditional planets to 10 planets + ASPECTABLE_ANGLES (Ascendant, Midheaven, Part of Fortune),
+// but that widened list is still unaffected by `bodies`.
+test('calculate_synastry house_overlay body list is unaffected by bodies override', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
   const result = await server.handleToolCall('calculate_synastry', { ...SYNASTRY_INPUT, bodies: ['Sun', 'Juno'] });
 
+  const expectedOverlayBodies = [...TEN_TRADITIONAL_PLANETS, ...ASPECTABLE_ANGLES].sort();
   assert.deepEqual(
     Object.keys(result.house_overlay.person1_planets_in_person2_houses).sort(),
-    [...TEN_TRADITIONAL_PLANETS].sort()
+    expectedOverlayBodies
   );
   assert.deepEqual(
     Object.keys(result.house_overlay.person2_planets_in_person1_houses).sort(),
-    [...TEN_TRADITIONAL_PLANETS].sort()
+    expectedOverlayBodies
   );
 });
 
