@@ -147,7 +147,87 @@ test('calculate_synastry include_angles: derived-class orb drops wide Fortune co
     'PoF square Saturn (7.10 deg) exceeds the derived class 2-deg square orb and should drop'
   );
 
-  assert.equal(fortuneRows.length, 3, 'exactly three Fortune contacts survive the tighter derived-class orb for this fixture pair (IC excluded, SUP-159)');
+  // SUP-263: the angle-aspect planet side now defaults to the full 17-body list instead of the
+  // 10 traditional planets, so Chiron/Juno/Lilith can newly contact Fortune for this fixture pair.
+  assert.ok(
+    fortuneRows.some((a) => a.person1_point === 'Chiron' && a.person2_point === 'Part of Fortune' && a.aspect === 'trine' && a.orb === '0.90'),
+    'P1 Chiron trine P2 Fortune (0.90 deg) is newly in scope under the wider default body list and should survive'
+  );
+  assert.ok(
+    fortuneRows.some((a) => a.person1_point === 'Juno' && a.person2_point === 'Part of Fortune' && a.aspect === 'trine' && a.orb === '1.07'),
+    'P1 Juno trine P2 Fortune (1.07 deg) is newly in scope under the wider default body list and should survive'
+  );
+  assert.ok(
+    fortuneRows.some((a) => a.person1_point === 'Part of Fortune' && a.person2_point === 'Lilith' && a.aspect === 'conjunction' && a.orb === '2.62'),
+    'P1 Fortune conjunction P2 Lilith (2.62 deg) is newly in scope under the wider default body list and should survive'
+  );
+
+  assert.equal(fortuneRows.length, 6, 'six Fortune contacts survive the tighter derived-class orb for this fixture pair under the SUP-263 17-body default (IC excluded, SUP-159)');
+});
+
+const SYNASTRY_INPUT = {
+  person1_datetime: DAY_CHART.datetime,
+  person1_latitude: DAY_CHART.latitude,
+  person1_longitude: DAY_CHART.longitude,
+  person2_datetime: PARTNER_CHART.datetime,
+  person2_latitude: PARTNER_CHART.latitude,
+  person2_longitude: PARTNER_CHART.longitude,
+};
+
+const TEN_TRADITIONAL_PLANETS = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
+
+// SUP-263: calculate_synastry cross-aspected only the 10 traditional planets with no way to
+// widen or narrow the list. It now defaults to the same DEFAULT_ASPECT_BODIES 17-body list as
+// calculate_aspects/calculate_transits, with a `bodies` override, mirroring resolveAspectBodies's
+// validation but scoped to DEFAULT_ASPECT_BODIES only (no angles/South Node here).
+test('calculate_synastry default bodies cross-aspects beyond the 10 traditional planets', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_synastry', SYNASTRY_INPUT);
+
+  const tenPlanets = new Set(TEN_TRADITIONAL_PLANETS);
+  const involvesWiderBody = result.synastry_aspects.some(
+    (a) => !tenPlanets.has(a.person1_planet) || !tenPlanets.has(a.person2_planet)
+  );
+  assert.ok(involvesWiderBody, 'expect at least one synastry aspect involving a body outside the 10 traditional planets');
+});
+
+test('calculate_synastry bodies override restricts the grid to just those bodies', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_synastry', { ...SYNASTRY_INPUT, bodies: ['Sun', 'Moon'] });
+
+  assert.ok(result.synastry_aspects.length > 0, 'expect at least one Sun/Moon aspect for this fixture pair');
+  assert.ok(
+    result.synastry_aspects.every((a) => ['Sun', 'Moon'].includes(a.person1_planet) && ['Sun', 'Moon'].includes(a.person2_planet)),
+    'every synastry aspect should be limited to Sun/Moon when bodies is restricted'
+  );
+});
+
+test('calculate_synastry unknown body in bodies param throws InvalidParams', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  await assert.rejects(
+    () => server.handleToolCall('calculate_synastry', { ...SYNASTRY_INPUT, bodies: ['NotARealBody'] }),
+    /Unknown body/
+  );
+});
+
+// Regression guard: house_overlay's body list must stay fixed regardless of the `bodies`
+// override - overlaying the full 17-body list into 12 houses is noisier and was intentionally
+// excluded from this param (SUP-150/SUP-263). SUP-265 widened the fixed list itself from the 10
+// traditional planets to 10 planets + ASPECTABLE_ANGLES (Ascendant, Midheaven, Part of Fortune),
+// but that widened list is still unaffected by `bodies`.
+test('calculate_synastry house_overlay body list is unaffected by bodies override', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_synastry', { ...SYNASTRY_INPUT, bodies: ['Sun', 'Juno'] });
+
+  const expectedOverlayBodies = [...TEN_TRADITIONAL_PLANETS, ...ASPECTABLE_ANGLES].sort();
+  assert.deepEqual(
+    Object.keys(result.house_overlay.person1_planets_in_person2_houses).sort(),
+    expectedOverlayBodies
+  );
+  assert.deepEqual(
+    Object.keys(result.house_overlay.person2_planets_in_person1_houses).sort(),
+    expectedOverlayBodies
+  );
 });
 
 // SUP-265: angle_aspects rows previously carried only person1_point/person2_point (names),
