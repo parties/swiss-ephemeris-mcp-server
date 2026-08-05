@@ -27,7 +27,6 @@ import {
   calculateNatalAspects,
   calculateCrossChartAspects,
   calculateHouseOverlay,
-  findHouseForLongitude,
   toAspectBody,
   toPointPosition,
   resolveChartPoint,
@@ -505,14 +504,17 @@ class SwissEphemerisServer {
       }
 
       // Calculate Part of Fortune: ASC + Moon - Sun for a day chart (Sun above the
-      // horizon, houses 7-12), ASC + Sun - Moon for a night chart (Sun below the
-      // horizon, houses 1-6) - the traditional day/night distinction.
+      // horizon), ASC + Sun - Moon for a night chart (Sun below the horizon) - the
+      // traditional day/night distinction. Sect is a property of the ASC/DSC horizon
+      // axis, so it's derived directly from longitudes rather than from `houses`,
+      // which is display-house-system-dependent (e.g. Whole Sign widens house 1 to
+      // 0° of the Ascendant's sign, decoupling it from the true Ascendant degree).
       if (chartPoints.Ascendant && planets.Sun && planets.Moon) {
         const ascLon = chartPoints.Ascendant.longitude;
         const sunLon = planets.Sun.longitude;
         const moonLon = planets.Moon.longitude;
-        const sunHouse = findHouseForLongitude(sunLon, houses);
-        const isNightChart = sunHouse !== null && sunHouse <= 6;
+        const offsetFromAsc = ((sunLon - ascLon) % 360 + 360) % 360;
+        const isNightChart = offsetFromAsc < 180;
         let fortuneLon = isNightChart
           ? (ascLon + sunLon - moonLon) % 360
           : (ascLon + moonLon - sunLon) % 360;

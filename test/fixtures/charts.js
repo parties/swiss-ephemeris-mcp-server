@@ -62,6 +62,27 @@ export const SOUTHERN_CHART = {
   },
 };
 
+/**
+ * SUP-274 regression case: Sun sits between 0deg of the Ascendant's sign and the true
+ * Ascendant degree, so Whole Sign widens house 1 to include the Sun while Placidus (whose
+ * cusp 1 matches the true Ascendant) does not. Sect must come out "day" under every house
+ * system - see the house-system-invariance tests in part-of-fortune.integration.test.js.
+ */
+export const WHOLE_SIGN_EDGE_CHART = {
+  label: 'Whole Sign edge case (Greenwich) - Sun between 0deg Aries and the true Ascendant',
+  datetime: '2024-04-04T06:00:00Z',
+  latitude: 51.4769,
+  longitude: 0.0,
+  expected: {
+    sect: 'day',
+    sunHouse: 12,
+    partOfFortune: 327.161505, // 27°10′ Aquarius (Placidus; house-system-invariant per SUP-274)
+  },
+};
+
+// Not included in ALL_CHARTS: several test suites key fixed expectations (e.g. minimum
+// aspect counts) off ALL_CHARTS by fixture.label, and this fixture doesn't have entries
+// there. It's consumed directly by the house-system-invariance tests instead.
 export const ALL_CHARTS = [DAY_CHART, NIGHT_CHART, PARTNER_CHART, SOUTHERN_CHART];
 
 /**
