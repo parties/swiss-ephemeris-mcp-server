@@ -96,7 +96,7 @@ Calculate birth chart positions and current transits for comparison, including a
 **Returns:**
 - `natal_chart`: Complete birth chart data
 - `current_transits`: Current planetary positions
-- `transit_aspects`: Array of aspects from transiting bodies to the natal chart, sorted by orb ascending. Each entry has `transiting_body`, `natal_body`, `aspect`, `category`, `orb`, `exact_angle`, `applying`.
+- `transit_aspects`: Array of aspects from transiting bodies to the natal chart, sorted by orb ascending. Each entry has `transiting_body`, `natal_body`, `aspect`, `category`, `orb`, `exact_angle`, `applying`. `applying` is computed from the transiting body's motion only — the natal position is treated as a fixed snapshot, so a retrograde or stationary natal body never affects it.
 - `settings_used`: The resolved settings (including `orb_model`) actually applied to `transit_aspects`.
 - `calculation_time`: Timestamp of transit calculation
 
