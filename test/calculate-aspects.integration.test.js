@@ -130,6 +130,27 @@ test('reference chart 7: South Node opt-in mirrors North Node aspects (same orb,
   assert.ok(Math.abs(marsNorthNode.orb - marsSouthNode.orb) < 1e-6, 'South Node orb should mirror North Node orb');
 });
 
+test('reference chart 7b: Vertex is absent by default, opt-in via include_vertex works independently of include_angles', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const withoutVertex = await server.handleToolCall('calculate_aspects', REFERENCE_INPUT);
+  const withVertex = await server.handleToolCall('calculate_aspects', { ...REFERENCE_INPUT, include_vertex: true, include_angles: false });
+
+  assert.ok(!withoutVertex.aspects.some((a) => a.body_a === 'Vertex' || a.body_b === 'Vertex'));
+
+  const vertexAspects = withVertex.aspects.filter((a) => a.body_a === 'Vertex' || a.body_b === 'Vertex');
+  assert.ok(vertexAspects.length > 0, 'include_vertex: true should add Vertex aspects even with include_angles: false');
+  assert.equal(withVertex.settings_used.include_vertex, true);
+  assert.equal(withVertex.settings_used.include_angles, false);
+});
+
+test('reference chart 7c: bodies:["Vertex"] without include_vertex still yields zero Vertex rows', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_aspects', { ...REFERENCE_INPUT, bodies: ['Sun', 'Vertex'] });
+
+  assert.ok(!result.aspects.some((a) => a.body_a === 'Vertex' || a.body_b === 'Vertex'));
+  assert.equal(result.settings_used.include_vertex, false);
+});
+
 test('reference chart 8 (cross-check): calculate_aspects longitudes byte-match calculate_planetary_positions', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
   const positions = await server.handleToolCall('calculate_planetary_positions', REFERENCE_INPUT);

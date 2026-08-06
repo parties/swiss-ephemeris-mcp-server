@@ -73,6 +73,30 @@ test('calculate_transits excludes transiting Ascendant even when explicitly requ
   assert.ok(!result.transit_aspects.some((a) => a.transiting_body === 'Ascendant'));
 });
 
+test('calculate_transits Vertex is absent by default', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_transits', DAY_CHART_INPUT);
+
+  assert.ok(!result.transit_aspects.some((a) => a.transiting_body === 'Vertex' || a.natal_body === 'Vertex'));
+  assert.equal(result.settings_used.include_vertex, false);
+});
+
+test('calculate_transits include_vertex surfaces the natal Vertex but never the transiting Vertex', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_transits', { ...DAY_CHART_INPUT, include_vertex: true });
+
+  assert.ok(result.transit_aspects.some((a) => a.natal_body === 'Vertex'), 'expect at least one natal Vertex contact');
+  assert.ok(!result.transit_aspects.some((a) => a.transiting_body === 'Vertex'), 'transiting Vertex must never appear, even with include_vertex: true');
+  assert.equal(result.settings_used.include_vertex, true);
+});
+
+test('calculate_transits excludes transiting Vertex even when explicitly requested via bodies', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_transits', { ...DAY_CHART_INPUT, bodies: ['Sun', 'Vertex'], include_vertex: true });
+
+  assert.ok(!result.transit_aspects.some((a) => a.transiting_body === 'Vertex'));
+});
+
 // SUP-224: resolveAspectBodies gates include_angles/include_south_node identically for the
 // natal path (calculate_aspects) and the cross-chart path (calculate_transits), including when
 // an explicit `bodies` array is passed - previously the explicit array bypassed the flags on

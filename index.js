@@ -160,6 +160,10 @@ class SwissEphemerisServer {
                   type: 'boolean',
                   description: 'Include South Node in transit_aspects. Default false.',
                 },
+                include_vertex: {
+                  type: 'boolean',
+                  description: 'Include the NATAL Vertex in `transit_aspects`. Default false, independent of `include_angles`. The transiting Vertex is always excluded from the transiting side, even if requested via `bodies`: like the transiting angles, it\'s an artifact of the moment\'s location/time and changes continuously, so transit-side Vertex contacts carry no meaning.',
+                },
                 bodies: {
                   type: 'array',
                   items: { type: 'string' },
@@ -255,6 +259,10 @@ class SwissEphemerisServer {
                   type: 'boolean',
                   description: 'Include cross-chart aspects to chart angles (Ascendant, Midheaven, IC, Descendant, Part of Fortune) in addition to planet-planet aspects. Default false.',
                 },
+                include_vertex: {
+                  type: 'boolean',
+                  description: 'Include the Vertex in `angle_aspects` (planet-to-Vertex and Vertex-to-Vertex contacts across the two charts). Default false, independent of `include_angles` — setting this alone still produces an `angle_aspects` array, containing only Vertex contacts.',
+                },
                 bodies: {
                   type: 'array',
                   items: { type: 'string' },
@@ -311,6 +319,10 @@ class SwissEphemerisServer {
                 include_south_node: {
                   type: 'boolean',
                   description: 'Include South Node in aspect calculations. Default false.',
+                },
+                include_vertex: {
+                  type: 'boolean',
+                  description: 'Include the Vertex in aspect calculations. Default false. Independent of `include_angles` — the Vertex is contested and highly sensitive to birth-time precision (more so than the Ascendant), so it\'s opt-in on its own. The anti-Vertex (Vertex + 180°) is never separately aspected, for the same double-counting reason IC/Descendant are excluded (see README Angle Aspects).',
                 },
                 bodies: {
                   type: 'array',
@@ -602,12 +614,13 @@ class SwissEphemerisServer {
     const {
       includeAngles = false,
       includeSouthNode = false,
+      includeVertex = false,
       bodies,
       orbOverrides = {},
       orbModel = 'moiety',
     } = options;
 
-    const knownBodies = new Set([...DEFAULT_ASPECT_BODIES, ...ANGLE_BODIES, 'South Node']);
+    const knownBodies = new Set([...DEFAULT_ASPECT_BODIES, ...ANGLE_BODIES, 'South Node', 'Vertex']);
 
     const requestedBodies = Array.isArray(bodies) && bodies.length ? bodies : DEFAULT_ASPECT_BODIES;
 
@@ -630,10 +643,13 @@ class SwissEphemerisServer {
     if (includeSouthNode) {
       bodySet.add('South Node');
     }
+    if (includeVertex) {
+      bodySet.add('Vertex');
+    }
 
-    // include_angles/include_south_node gate which bodies enter aspect matching, and that
-    // gate applies uniformly whether a body came from the default set or an explicit `bodies`
-    // array (SUP-224) - both the natal path (calculate_aspects) and the cross-chart path
+    // include_angles/include_south_node/include_vertex gate which bodies enter aspect matching,
+    // and that gate applies uniformly whether a body came from the default set or an explicit
+    // `bodies` array (SUP-224) - both the natal path (calculate_aspects) and the cross-chart path
     // (calculate_transits/synastry) resolve bodies through here, so they can never disagree.
     // DSC/IC are legitimate computed points but never enter aspect pair-matching - see
     // ASPECTABLE_ANGLES - so they're dropped unconditionally, independent of include_angles.
@@ -642,6 +658,8 @@ class SwissEphemerisServer {
     for (const name of Array.from(bodySet)) {
       if (name === 'South Node') {
         if (!includeSouthNode) bodySet.delete(name);
+      } else if (name === 'Vertex') {
+        if (!includeVertex) bodySet.delete(name);
       } else if (nonAspectableAngleSet.has(name)) {
         bodySet.delete(name);
       } else if (aspectableAngleSet.has(name) && !includeAngles) {
@@ -664,6 +682,7 @@ class SwissEphemerisServer {
       includeMinor = false,
       includeAngles = false,
       includeSouthNode = false,
+      includeVertex = false,
       orbOverrides = {},
       orbModel = 'moiety',
     } = options;
@@ -684,6 +703,7 @@ class SwissEphemerisServer {
         include_minor_aspects: includeMinor,
         include_angles: includeAngles,
         include_south_node: includeSouthNode,
+        include_vertex: includeVertex,
         bodies: requestedBodies,
         orb_overrides: orbOverrides,
         orb_model: orbModel,
@@ -699,19 +719,23 @@ class SwissEphemerisServer {
       includeMinor = false,
       includeAngles = false,
       includeSouthNode = false,
+      includeVertex = false,
       orbOverrides = {},
       orbModel = 'moiety',
     } = options;
 
     const { bodiesWithLonSpeed: natalBodies, requestedBodies } = this.resolveAspectBodies(natalChart, options);
 
-    // Angles and Part of Fortune are artifacts of the moment's location and time of day: the
-    // transiting Ascendant sweeps the whole zodiac daily, so transit-side angle contacts change
-    // minute to minute and mean nothing. include_angles adds angles to the natal side only.
-    // This drop is unconditional (SUP-154) and sits *after* resolveAspectBodies's shared
-    // include_angles/include_south_node gate (SUP-224) - it is transit-side-only and must not
-    // be merged into that shared gate, which natal callers also go through.
-    const angleSet = new Set(ANGLE_BODIES);
+    // Angles, Part of Fortune, and the Vertex are artifacts of the moment's location and time of
+    // day: the transiting Ascendant sweeps the whole zodiac daily, and the transiting Vertex is
+    // exactly as time-of-moment-dependent (and per the GH #6 issue, even more birth-time-sensitive
+    // than the Ascendant) - so transit-side contacts to any of them change minute to minute and
+    // mean nothing. include_angles/include_vertex add these to the natal side only, never as
+    // transiting_body. This drop is unconditional (SUP-154) and sits *after* resolveAspectBodies's
+    // shared include_angles/include_south_node/include_vertex gate (SUP-224) - it is
+    // transit-side-only and must not be merged into that shared gate, which natal callers also go
+    // through.
+    const angleSet = new Set([...ANGLE_BODIES, 'Vertex']);
     const { bodiesWithLonSpeed: allTransitBodies } = this.resolveAspectBodies(transitChart, options);
     const transitBodies = allTransitBodies.filter((b) => !angleSet.has(b.name));
 
@@ -741,6 +765,7 @@ class SwissEphemerisServer {
         include_minor_aspects: includeMinor,
         include_angles: includeAngles,
         include_south_node: includeSouthNode,
+        include_vertex: includeVertex,
         bodies: requestedBodies,
         orb_overrides: orbOverrides,
         orb_model: orbModel,
@@ -801,14 +826,21 @@ class SwissEphemerisServer {
   // DSC/IC are excluded here - they mirror ASC/MC, so aspecting them would double-count
   // every axis contact under two labels. They remain available as computed chart points.
   calculateSynastryAngleAspects(person1Chart, person2Chart, options = {}) {
+    const { includeAngles = false, includeVertex = false } = options;
+
     const toBodies = (chart, names) => names
       .map((name) => toAspectBody(chart, name))
       .filter(Boolean);
 
     const requestedBodies = this.resolveSynastryBodies(options.bodies);
 
+    const angleBodyNames = [
+      ...(includeAngles ? ASPECTABLE_ANGLES : []),
+      ...(includeVertex ? ['Vertex'] : []),
+    ];
+
     const toPlanetBodies = (chart) => toBodies(chart, requestedBodies);
-    const toAngleBodies = (chart) => toBodies(chart, ASPECTABLE_ANGLES);
+    const toAngleBodies = (chart) => toBodies(chart, angleBodyNames);
 
     const person1Planets = toPlanetBodies(person1Chart);
     const person2Planets = toPlanetBodies(person2Chart);
@@ -873,6 +905,7 @@ class SwissEphemerisServer {
           include_minor: transit_include_minor,
           include_angles: transit_include_angles,
           include_south_node: transit_include_south_node,
+          include_vertex: transit_include_vertex,
           bodies: transit_bodies,
           orb_overrides: transit_orb_overrides,
           orb_model: transit_orb_model,
@@ -911,6 +944,10 @@ class SwissEphemerisServer {
           throw new McpError(ErrorCode.InvalidParams, 'include_south_node must be a boolean');
         }
 
+        if (transit_include_vertex !== undefined && typeof transit_include_vertex !== 'boolean') {
+          throw new McpError(ErrorCode.InvalidParams, 'include_vertex must be a boolean');
+        }
+
         if (transit_bodies !== undefined && (!Array.isArray(transit_bodies) || !transit_bodies.every((b) => typeof b === 'string'))) {
           throw new McpError(ErrorCode.InvalidParams, 'bodies must be an array of strings');
         }
@@ -935,6 +972,7 @@ class SwissEphemerisServer {
            includeMinor: transit_include_minor,
            includeAngles: transit_include_angles,
            includeSouthNode: transit_include_south_node,
+           includeVertex: transit_include_vertex,
            bodies: transit_bodies,
            orbOverrides: transit_orb_overrides,
            orbModel: transit_orb_model,
@@ -1017,7 +1055,7 @@ class SwissEphemerisServer {
         };
 
       case 'calculate_synastry':
-        const { person1_datetime, person1_latitude, person1_longitude, person2_datetime, person2_latitude, person2_longitude, include_minor: synastry_include_minor, include_angles: synastry_include_angles, bodies: synastry_bodies, orb_overrides: synastry_orb_overrides, orb_model: synastry_orb_model, person1_house_system, person2_house_system } = args;
+        const { person1_datetime, person1_latitude, person1_longitude, person2_datetime, person2_latitude, person2_longitude, include_minor: synastry_include_minor, include_angles: synastry_include_angles, include_vertex: synastry_include_vertex, bodies: synastry_bodies, orb_overrides: synastry_orb_overrides, orb_model: synastry_orb_model, person1_house_system, person2_house_system } = args;
 
         if (synastry_include_minor !== undefined && typeof synastry_include_minor !== 'boolean') {
           throw new McpError(ErrorCode.InvalidParams, 'include_minor must be a boolean');
@@ -1025,6 +1063,10 @@ class SwissEphemerisServer {
 
         if (synastry_include_angles !== undefined && typeof synastry_include_angles !== 'boolean') {
           throw new McpError(ErrorCode.InvalidParams, 'include_angles must be a boolean');
+        }
+
+        if (synastry_include_vertex !== undefined && typeof synastry_include_vertex !== 'boolean') {
+          throw new McpError(ErrorCode.InvalidParams, 'include_vertex must be a boolean');
         }
 
         if (synastry_bodies !== undefined && (!Array.isArray(synastry_bodies) || !synastry_bodies.every((b) => typeof b === 'string'))) {
@@ -1113,11 +1155,15 @@ class SwissEphemerisServer {
           person2_planets_in_person1_houses: calculateHouseOverlay(person2PlanetBodies, person1NatalChart.houses),
         };
 
-        // Optional angle aspects: planet-to-angle and angle-to-angle contacts across the two charts
+        // Optional angle aspects: planet-to-angle and angle-to-angle contacts across the two charts.
+        // include_vertex alone (without include_angles) still produces angle_aspects, containing
+        // only Vertex contacts.
         let angleAspects;
-        if (synastry_include_angles) {
+        if (synastry_include_angles || synastry_include_vertex) {
           angleAspects = this.calculateSynastryAngleAspects(person1NatalChart, person2NatalChart, {
             includeMinor: synastry_include_minor,
+            includeAngles: synastry_include_angles,
+            includeVertex: synastry_include_vertex,
             bodies: synastry_bodies,
             orbOverrides: synastry_orb_overrides,
             orbModel: synastry_orb_model,
@@ -1129,7 +1175,7 @@ class SwissEphemerisServer {
           person2_chart: person2NatalChart,
           synastry_aspects: aspects,
           house_overlay: houseOverlay,
-          ...(synastry_include_angles ? { angle_aspects: angleAspects } : {}),
+          ...((synastry_include_angles || synastry_include_vertex) ? { angle_aspects: angleAspects } : {}),
           calculation_time: new Date().toISOString()
         };
 
@@ -1141,6 +1187,7 @@ class SwissEphemerisServer {
           include_minor,
           include_angles,
           include_south_node,
+          include_vertex,
           bodies: aspects_bodies,
           orb_overrides,
           orb_model,
@@ -1180,6 +1227,10 @@ class SwissEphemerisServer {
           throw new McpError(ErrorCode.InvalidParams, 'include_south_node must be a boolean');
         }
 
+        if (include_vertex !== undefined && typeof include_vertex !== 'boolean') {
+          throw new McpError(ErrorCode.InvalidParams, 'include_vertex must be a boolean');
+        }
+
         if (aspects_bodies !== undefined && (!Array.isArray(aspects_bodies) || !aspects_bodies.every((b) => typeof b === 'string'))) {
           throw new McpError(ErrorCode.InvalidParams, 'bodies must be an array of strings');
         }
@@ -1195,6 +1246,7 @@ class SwissEphemerisServer {
           includeMinor: include_minor,
           includeAngles: include_angles,
           includeSouthNode: include_south_node,
+          includeVertex: include_vertex,
           bodies: aspects_bodies,
           orbOverrides: orb_overrides,
           orbModel: orb_model,
