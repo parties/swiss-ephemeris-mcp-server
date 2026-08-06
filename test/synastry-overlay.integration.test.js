@@ -56,6 +56,37 @@ test('calculate_synastry include_angles surfaces planet-to-angle and angle-to-an
   }
 });
 
+test('calculate_synastry include_vertex alone (without include_angles) surfaces angle_aspects containing only Vertex contacts', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_synastry', { ...PERSON1, ...PERSON2, include_vertex: true });
+
+  assert.ok(Array.isArray(result.angle_aspects));
+  assert.ok(result.angle_aspects.length > 0, 'expect at least one Vertex contact for this pair');
+  assert.ok(
+    result.angle_aspects.every((a) => a.person1_point === 'Vertex' || a.person2_point === 'Vertex'),
+    'every row should involve the Vertex when include_vertex is set without include_angles'
+  );
+  assert.ok(
+    !result.angle_aspects.some((a) => ASPECTABLE_ANGLES.includes(a.person1_point) || ASPECTABLE_ANGLES.includes(a.person2_point)),
+    'ASC/MC/PoF should not appear when only include_vertex is set'
+  );
+});
+
+test('calculate_synastry include_angles + include_vertex together surface both angle and Vertex contacts', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('calculate_synastry', { ...PERSON1, ...PERSON2, include_angles: true, include_vertex: true });
+
+  const anglePoints = new Set(ASPECTABLE_ANGLES);
+  assert.ok(
+    result.angle_aspects.some((a) => anglePoints.has(a.person1_point) || anglePoints.has(a.person2_point)),
+    'expect at least one ASC/MC/PoF contact'
+  );
+  assert.ok(
+    result.angle_aspects.some((a) => a.person1_point === 'Vertex' || a.person2_point === 'Vertex'),
+    'expect at least one Vertex contact'
+  );
+});
+
 // Part of Fortune lives in additional_points, not chart_points; a lookup against the wrong
 // bucket dropped it from every angle_aspects response without warning.
 test('calculate_synastry include_angles aspects Part of Fortune', { skip: !HAS_SWETEST }, async () => {
