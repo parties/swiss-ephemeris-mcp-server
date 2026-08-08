@@ -20,6 +20,8 @@ export const DAY_CHART = {
     sect: 'day',
     sunHouse: 10,
     partOfFortune: 77.6453, // 17°39′ Gemini
+    obliquity: 23.4423661, // true obliquity, 23°26′32.52″
+    outOfBounds: ['Uranus', 'Ceres'],
   },
 };
 
@@ -59,6 +61,8 @@ export const SOUTHERN_CHART = {
     sect: 'day',
     sunHouse: 8,
     partOfFortune: 316.2748, // 16°16′ Aquarius
+    obliquity: 23.4381391, // true obliquity - different from DAY_CHART's, so a hardcoded value fails here
+    outOfBounds: [],
   },
 };
 
