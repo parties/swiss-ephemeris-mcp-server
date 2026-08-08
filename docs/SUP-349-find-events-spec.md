@@ -306,6 +306,15 @@ Note also that at 12° the Saturn envelope swallows the following year's approac
 reader would call two visits. That is a property of the orb choice, not a bug — but see Q9 on
 `closest_approach` making it legible.
 
+> **Corrected 2026-08-08**, verified independently against the vendored ephemeris: the "merging"
+> described above does not actually happen for this example. Saturn genuinely leaves 12° orb of the
+> Sun between the two visits (the gap peaks at ~16.89° around 2027-08) before returning for a second
+> approach that gets to within 10.21° and never perfects. The correct behavior is **two separate
+> episodes**, not one 734.3-day envelope — see the corrected §4.4 for the full figures. The general
+> point (orb model changes which visits get grouped into one episode, and a consumer cannot mentally
+> correct for it) still holds; it just needs a different example than a genuine single-envelope case
+> to illustrate it, and this document does not attempt one.
+
 **The stationing-without-perfecting case: yes, it is an event, and it is often the strongest form a
 transit takes.** A body that stations within orb sits on the contact for months — "Saturn stationing
 on your Sun" is read as heavier than a clean fast pass, not lighter.
@@ -786,15 +795,27 @@ with ephemeris updates); assert the Moon's absence and presence instead.
 
 ### 4.4 Orb model changes the period, in both directions
 
-Transiting Saturn square DAY_CHART natal Sun (target 10.8142608). **Identical passes under both
-models** — assert this explicitly, since it is what makes the envelope difference legible:
+Transiting Saturn square DAY_CHART natal Sun (target 10.8142608). **Identical passes in the shared
+first episode** — assert this explicitly, since it is what makes the envelope difference legible:
 
-| Model | Orb | enters_orb | leaves_orb | Days |
-|---|---|---|---|---|
-| moiety | 12 | 2026-02-02T17:55:52Z | 2028-02-07T00:32:27Z | 734.3 |
-| class | 8 | 2026-03-10T00:14:51Z | 2027-04-16T19:44:33Z | 402.8 |
+| Model | Orb | Episode | enters_orb | leaves_orb | Days | Passes |
+|---|---|---|---|---|---|---|
+| moiety | 12 | 1 | 2026-02-02T17:55:52Z | 2027-05-20T07:39:16Z | 471.6 | 3 |
+| moiety | 12 | 2 | 2027-11-07T21:39:59Z | 2028-02-07T00:32:27Z | — (never perfects) | 0 |
+| class | 8 | 1 | 2026-03-10T00:14:51Z | 2027-04-16T19:44:33Z | 402.8 | 3 |
 
-Passes under both: 2026-05-16T14:04:26Z (D), 2026-10-10T17:44:22Z (R), 2027-02-07T02:42:05Z (D).
+Passes shared by moiety episode 1 and class: 2026-05-16T14:04:26Z (D), 2026-10-10T17:44:22Z (R),
+2027-02-07T02:42:05Z (D). Moiety episode 2's `closest_approach.stationary` is `true` — it has no
+exact pass, only a station within its wider orb.
+
+> **Corrected 2026-08-08**, verified independently against the vendored ephemeris (see the matching
+> Q4 correction above): the original table asserted a single 734.3-day moiety envelope. That number
+> was an artifact of the pre-fix implementation, which took the first and last orb-boundary crossing
+> as the envelope regardless of whether the body left orb in between. Saturn's gap to the Sun genuinely
+> exceeds 12° between the two approaches (peaking at ~16.89° around 2027-08), so the moiety window is
+> two real episodes, not one. The narrower class orb (8°) never reaches the second approach and stays
+> a single 402.8-day episode exactly as before — the identical-passes assertion for the shared first
+> episode is unaffected by this correction.
 
 Also assert the reverse direction on a different pair, so a test cannot pass by assuming moiety is
 always wider: Pluto conjunct natal Venus is 6° under moiety and 8° under class.
