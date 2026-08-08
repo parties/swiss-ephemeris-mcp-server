@@ -388,8 +388,11 @@ class SwissEphemerisServer {
       const ephePath = process.env.SE_EPHE_PATH || DEFAULT_EPHE_PATH;
 
       // Execute swetest for planets, including asteroids and additional points
-      // 0123456789 = Sun through Pluto, t = true Node, A = mean Apogee (Lilith), D = Chiron, F = Ceres, G = Pallas, H = Juno, I = Vesta
-      const planetCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -p0123456789tADFGHI -fPZS -g, -head`;
+      // 0123456789 = Sun through Pluto, t = true Node, A = mean Apogee (Lilith), D = Chiron, F = Ceres, G = Pallas, H = Juno, I = Vesta, o = obliquity (Ecl. Obl. pseudo-body)
+      // -fPZSBD adds ecliptic latitude and declination; -l appends a decimal field, used to
+      // read the true obliquity off the Ecl. Obl. row without relying on its zodiacal
+      // encoding landing in Aries by luck (docs/SUP-345-declination-layer-spec.md §1.4).
+      const planetCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -p0123456789tADFGHIo -fPZSBDl -g, -head`;
       let planetOutput;
       try {
         planetOutput = execSync(planetCmd, { encoding: 'utf8' });
@@ -398,7 +401,7 @@ class SwissEphemerisServer {
       }
 
       // Execute swetest for houses
-      const houseCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -house${longitude},${latitude},${houseSystem} -fPZ -g, -head`;
+      const houseCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -house${longitude},${latitude},${houseSystem} -fPZSBD -g, -head`;
       let houseOutput;
       try {
         houseOutput = execSync(houseCmd, { encoding: 'utf8' });
@@ -413,47 +416,79 @@ class SwissEphemerisServer {
       const missingEphemerisFiles = [...planetOutput.matchAll(/error: SwissEph file '([^']+)' not found/g)]
         .map((m) => m[1]);
 
+      // The true obliquity of the ecliptic for the moment, read off the Ecl. Obl. pseudo-body
+      // row (see planetCmd comment above). Needed before planets are parsed so out-of-bounds
+      // can be computed inline.
+      const obliquityLine = planetOutput.split('\n').find(line => line.trim().startsWith('Ecl. Obl.'));
+      const obliquity = obliquityLine ? parsePlanetLine(obliquityLine)?.obliquity : undefined;
+
       // Parse planets
       const planets = {};
       const planetLines = planetOutput.split('\n').filter(line => line.trim() && !line.includes('error:') && !line.includes('warning:'));
 
       planetLines.forEach(line => {
         const planet = parsePlanetLine(line);
-        if (planet && missingEphemerisFiles.length > 0 && planet.longitude === 0 && planet.speed === 0) {
+        if (!planet) return;
+        // Ecl. Obl. is a pseudo-body (§1.4 above), not a real position - it must never enter
+        // `planets` or aspect matching. Its data was already captured above.
+        if (planet.name === 'Ecl. Obl.') return;
+        if (missingEphemerisFiles.length > 0 && planet.longitude === 0 && planet.speed === 0) {
           // Placeholder row from a missing ephemeris file, not a real position - drop it.
           return;
         }
-        if (planet) {
-          // Map swetest planet codes to readable names
-          const planetNames = {
-            'Sun': 'Sun',
-            'Moon': 'Moon', 
-            'Mercury': 'Mercury',
-            'Venus': 'Venus',
-            'Mars': 'Mars',
-            'Jupiter': 'Jupiter',
-            'Saturn': 'Saturn',
-            'Uranus': 'Uranus',
-            'Neptune': 'Neptune',
-            'Pluto': 'Pluto',
-            'mean Node': 'North Node',
-            'true Node': 'North Node',
-            'Chiron': 'Chiron',
-            'mean Apogee': 'Lilith',
-            'Ceres': 'Ceres',
-            'Pallas': 'Pallas',
-            'Juno': 'Juno',
-            'Vesta': 'Vesta'
-          };
-          
-          const name = planetNames[planet.name] || planet.name;
-          planets[name] = {
-            longitude: planet.longitude,
-            sign: planet.sign,
-            degree: planet.degree,
-            speed: planet.speed
-          };
+
+        // Map swetest planet codes to readable names
+        const planetNames = {
+          'Sun': 'Sun',
+          'Moon': 'Moon',
+          'Mercury': 'Mercury',
+          'Venus': 'Venus',
+          'Mars': 'Mars',
+          'Jupiter': 'Jupiter',
+          'Saturn': 'Saturn',
+          'Uranus': 'Uranus',
+          'Neptune': 'Neptune',
+          'Pluto': 'Pluto',
+          'mean Node': 'North Node',
+          'true Node': 'North Node',
+          'Chiron': 'Chiron',
+          'mean Apogee': 'Lilith',
+          'Ceres': 'Ceres',
+          'Pallas': 'Pallas',
+          'Juno': 'Juno',
+          'Vesta': 'Vesta'
+        };
+
+        const name = planetNames[planet.name] || planet.name;
+
+        // Out-of-bounds: |declination| > true obliquity of the date. The Sun is suppressed
+        // unconditionally - its ~0.5" apparent ecliptic latitude (light-time/aberration) can
+        // push its apparent declination a fraction of an arcsecond past true obliquity right
+        // at a solstice, which would flag the body that *defines* the bound as having left
+        // it. This is a real, reproducible false positive, not a hypothetical - see
+        // docs/SUP-345-declination-layer-spec.md §Q4. Do not "fix" this back to a plain
+        // comparison; the MOIETIES halving comment in lib/aspects.js is the house precedent
+        // for guarding a deliberate-looking-wrong constant.
+        let outOfBounds = false;
+        let outOfBoundsBy = null;
+        if (name !== 'Sun' && obliquity !== undefined && planet.declination !== undefined) {
+          const diff = Math.abs(planet.declination) - obliquity;
+          if (diff > 0) {
+            outOfBounds = true;
+            outOfBoundsBy = diff;
+          }
         }
+
+        planets[name] = {
+          longitude: planet.longitude,
+          sign: planet.sign,
+          degree: planet.degree,
+          speed: planet.speed,
+          ecliptic_latitude: planet.ecliptic_latitude,
+          declination: planet.declination,
+          out_of_bounds: outOfBounds,
+          out_of_bounds_by: outOfBoundsBy
+        };
       });
 
       // Parse houses and chart points from house output
@@ -469,7 +504,8 @@ class SwissEphemerisServer {
             houses[house.house] = {
               longitude: house.longitude,
               sign: house.sign,
-              degree: house.degree
+              degree: house.degree,
+              declination: house.declination
             };
           }
         }
@@ -483,13 +519,19 @@ class SwissEphemerisServer {
               'ARMC': 'ARMC',
               'Vertex': 'Vertex'
             };
-            
+
             const name = pointNames[chartPoint.name] || chartPoint.name;
             chartPoints[name] = {
               longitude: chartPoint.longitude,
               sign: chartPoint.sign,
               degree: chartPoint.degree
             };
+            // ARMC's declination column is a meaningless right-ascension artifact, not a
+            // real declination (§1.3) - a literal 0 there would read as "on the celestial
+            // equator," which is false. Omit the field entirely rather than emit it.
+            if (name !== 'ARMC') {
+              chartPoints[name].declination = chartPoint.declination;
+            }
           }
         }
       });
@@ -511,7 +553,8 @@ class SwissEphemerisServer {
         additionalPoints['South Node'] = {
           longitude: southNodeLon,
           sign: signs[signIndex],
-          degree: Math.round(degree * 100) / 100
+          degree: Math.round(degree * 100) / 100,
+          declination: -planets['North Node'].declination
         };
       }
 
@@ -560,7 +603,8 @@ class SwissEphemerisServer {
         chartPoints.Descendant = {
           longitude: descLon,
           sign: signs[signIndex],
-          degree: Math.round(degree * 100) / 100
+          degree: Math.round(degree * 100) / 100,
+          declination: -chartPoints.Ascendant.declination
         };
       }
 
@@ -577,7 +621,8 @@ class SwissEphemerisServer {
         chartPoints.IC = {
           longitude: icLon,
           sign: signs[signIndex],
-          degree: Math.round(degree * 100) / 100
+          degree: Math.round(degree * 100) / 100,
+          declination: -chartPoints.Midheaven.declination
         };
       }
 
@@ -586,6 +631,8 @@ class SwissEphemerisServer {
         houses,
         chart_points: chartPoints,
         additional_points: additionalPoints,
+        obliquity,
+        obliquity_type: 'true',
         datetime: datetime,
         coordinates: {
           latitude,

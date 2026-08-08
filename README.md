@@ -11,6 +11,7 @@ A Model Context Protocol (MCP) server that provides astronomical calculations us
 - **Chart Points**: Ascendant, Midheaven, IC, Descendant
 - **Additional Points**: South Node, Part of Fortune
 - **Speed**: Every planet now includes a `speed` field (deg/day, signed, negative = retrograde)
+- **Declination**: Every planet includes `ecliptic_latitude`, `declination`, and out-of-bounds status; angles, cusps, and Vertex include `declination`
 - **Aspects**: Natal chart aspect calculation with applying/separating status
 
 ## Installation
@@ -70,10 +71,12 @@ Calculate astronomical data for a specific date, time, and location.
 - `house_system` (string, optional): House system code. Default `P`. See [House Systems](#house-systems).
 
 **Returns:**
-- `planets`: Positions of all planets and celestial bodies
-- `houses`: 12 astrological houses
-- `chart_points`: Ascendant, Midheaven, IC, Descendant
-- `additional_points`: South Node, Part of Fortune — computed with the traditional day-chart formula (`Ascendant + Moon - Sun`) when the Sun is in houses 7-12, or the night-chart formula (`Ascendant + Sun - Moon`) when the Sun is in houses 1-6.
+- `planets`: Positions of all planets and celestial bodies. Each entry has `longitude`, `sign`, `degree`, `speed`, `ecliptic_latitude` (decimal degrees, + = north of the ecliptic), `declination` (decimal degrees, + = north of the celestial equator), `out_of_bounds` (`true` when `|declination|` exceeds the obliquity of the date), and `out_of_bounds_by` (decimal degrees past the boundary when out of bounds, `null` otherwise). All 17 bodies carry all four fields uniformly, including North Node (`ecliptic_latitude: 0`, always in bounds). The Sun is hard-coded `out_of_bounds: false`: its ~0.5″ apparent ecliptic latitude (light-time and aberration) can push its apparent declination a fraction of an arcsecond past true obliquity right at a solstice, which would otherwise flag the body that defines the boundary as having left it.
+- `houses`: 12 astrological houses, each with `declination` in addition to `longitude`/`sign`/`degree`. No `ecliptic_latitude` or out-of-bounds fields — impossible for a latitude-0 point.
+- `chart_points`: Ascendant, Midheaven, IC, Descendant, Vertex, ARMC. All carry `declination` except ARMC — its declination column is a right ascension printed in zodiacal notation, not a real declination, so it's omitted rather than reported as a misleading `0`. IC and Descendant declinations are exact negations of Midheaven and Ascendant, matching how their longitudes are derived.
+- `additional_points`: South Node, Part of Fortune. South Node's `declination` is the exact negation of North Node's. Part of Fortune gets neither `ecliptic_latitude` nor `declination` — it's a longitude construct with no physical position, computed with the traditional day-chart formula (`Ascendant + Moon - Sun`) when the Sun is in houses 7-12, or the night-chart formula (`Ascendant + Sun - Moon`) when the Sun is in houses 1-6.
+- `obliquity`: True obliquity of the ecliptic for the moment (mean obliquity plus nutation), in decimal degrees. Required to audit any `out_of_bounds` flag independently.
+- `obliquity_type`: Always `"true"` — the audit trail for every `out_of_bounds` flag, distinguishing it from the mean obliquity (differs by up to a few arcseconds).
 - `house_system`: The house system code actually used
 - `warnings` (only present if something's missing): if an ephemeris data file needed for a body isn't found under `SE_EPHE_PATH`, that body is omitted from `planets` entirely rather than reported at a fabricated 0° Aries position, and a message naming the missing file is added here.
 
@@ -167,7 +170,7 @@ Calculate natal chart aspects for a given datetime and coordinates. Returns plan
 - `house_system` (string, optional): House system code. Default `P`. See [House Systems](#house-systems).
 
 **Returns:**
-- All fields from `calculate_planetary_positions` (`planets`, `houses`, `chart_points`, `additional_points`, `datetime`, `coordinates`, `house_system`)
+- All fields from `calculate_planetary_positions` (`planets`, `houses`, `chart_points`, `additional_points`, `obliquity`, `obliquity_type`, `datetime`, `coordinates`, `house_system`)
 - `aspects`: Array of qualifying aspects, sorted by orb ascending. Each entry has `body_a`, `body_b`, `aspect`, `category` (`major`/`minor`), `aspect_angle`, `separation`, `orb`, `orb_allowed`, and `applying` (`true`/`false`/`null` — `null` when applying/separating cannot be determined, e.g. angle points with no speed, near-stationary bodies, or an exact hit).
 - `settings_used`: The resolved settings (`include_minor_aspects`, `include_angles`, `include_south_node`, `include_vertex`, `bodies`, `orb_overrides`, `orb_model`) actually applied to the calculation.
 
