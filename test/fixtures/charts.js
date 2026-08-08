@@ -24,6 +24,11 @@ export const DAY_CHART = {
     outOfBounds: ['Uranus', 'Ceres'],
     trueNodeLongitude: 316.8703610, // 16°52′ Aquarius - default node_type (SUP-352)
     moonPhase: { phase: 'Crescent', elongation: 52.4533937, illuminatedFraction: 0.196208808 },
+    // SUP-350 find_events engine — window 2026-01-01 .. 2029-01-01, default transiting
+    // set, moiety orbs (spec §4.1/§4.2/§4.9).
+    plutoSquareLilithPasses: 5,
+    plutoConjunctVenusPasses: 3,
+    neptuneStationDirect2026: '2026-12-12T22:17:19Z',
   },
 };
 
