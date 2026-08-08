@@ -22,6 +22,11 @@ export const DAY_CHART = {
     partOfFortune: 77.6453, // 17°39′ Gemini
     obliquity: 23.4423661, // true obliquity, 23°26′32.52″
     outOfBounds: ['Uranus', 'Ceres'],
+    // SUP-350 find_events engine — window 2026-01-01 .. 2029-01-01, default transiting
+    // set, moiety orbs (spec §4.1/§4.2/§4.9).
+    plutoSquareLilithPasses: 5,
+    plutoConjunctVenusPasses: 3,
+    neptuneStationDirect2026: '2026-12-12T22:17:19Z',
   },
 };
 

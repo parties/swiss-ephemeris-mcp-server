@@ -20,6 +20,9 @@ import {
   resolveChartPoint,
   toAspectBody,
   invalidOrbOverrideKeys,
+  resolveAspectSettings,
+  orbClassForBody,
+  orbAllowedFor,
 } from '../lib/aspects.js';
 
 test('normalizeSeparation wraps around 0/360 seam (350 vs 10 -> sep 20, not 340)', () => {
@@ -275,6 +278,44 @@ test('every orb class ranks all majors wider than all minors', () => {
     const minors = Object.keys(MINOR_ASPECTS).map((k) => orbs[k]);
     assert.ok(Math.max(...minors) < Math.min(...majors), `${name}: max minor must be < min major`);
   }
+});
+
+// SUP-350: resolveAspectSettings/orbClassForBody/orbAllowedFor are the orb-resolution
+// surface lib/event-search.js is handed, so its passes/orbs can never drift from what
+// calculate_aspects/calculate_transits already compute for the same pair.
+test('orbAllowedFor (moiety): matches (moietyA + moietyB) * multiplier, same as matchAspectsForPair', () => {
+  const settings = resolveAspectSettings({ orbModel: 'moiety' });
+  const orb = orbAllowedFor(settings, 'Pluto', 'Venus', 'conjunction');
+  assert.equal(orb, (MOIETIES.Pluto + MOIETIES.Venus) * ASPECT_MULTIPLIERS.conjunction);
+});
+
+test('orbAllowedFor (class): matches the tighter side, same as matchAspectsForPair', () => {
+  const settings = resolveAspectSettings({ orbModel: 'class' });
+  const orb = orbAllowedFor(settings, 'Pluto', 'Venus', 'conjunction');
+  assert.equal(orb, DEFAULT_ORBS.conjunction);
+
+  const mixed = orbAllowedFor(settings, 'Saturn', 'Ascendant', 'square');
+  assert.equal(mixed, Math.min(DEFAULT_ORBS.square, ORB_CLASSES.angle.square));
+});
+
+test('orbAllowedFor: moiety and class orbs disagree in both directions for the same pair (Q4)', () => {
+  const moietySettings = resolveAspectSettings({ orbModel: 'moiety' });
+  const classSettings = resolveAspectSettings({ orbModel: 'class' });
+
+  // Saturn square Sun: moiety (4.5+7.5)=12 is WIDER than the class 8.
+  assert.equal(orbAllowedFor(moietySettings, 'Saturn', 'Sun', 'square'), 12);
+  assert.equal(orbAllowedFor(classSettings, 'Saturn', 'Sun', 'square'), 8);
+
+  // Pluto conjunct Venus: moiety (2.5+3.5)=6 is NARROWER than the class 8.
+  assert.equal(orbAllowedFor(moietySettings, 'Pluto', 'Venus', 'conjunction'), 6);
+  assert.equal(orbAllowedFor(classSettings, 'Pluto', 'Venus', 'conjunction'), 8);
+});
+
+test('orbClassForBody: angle/derived bodies map to their class, everything else defaults to body', () => {
+  assert.equal(orbClassForBody('Ascendant'), 'angle');
+  assert.equal(orbClassForBody('Part of Fortune'), 'derived');
+  assert.equal(orbClassForBody('Pluto'), 'body');
+  assert.equal(orbClassForBody('Some Unknown Point'), 'body');
 });
 
 // These orb-class tests exercise 'class'-model behavior specifically (per-class tables),
