@@ -10,6 +10,12 @@ scope: Western tropical astrology only
 
 # Top five missing features
 
+> **Update (SUP-353):** the `moon_phase at an instant` row below has since shipped — see
+> [`calculate_planetary_positions`](../README.md#calculate_planetary_positions) in `README.md` for
+> the current `moon_phase` output. The rest of this evaluation, including the `find_events` gap it
+> was originally scoped under, reflects the state *at the time this report was generated*, not the
+> present state.
+
 ## What the server does today
 
 Five tools — `calculate_planetary_positions`, `calculate_aspects`, `calculate_transits`,
