@@ -22,6 +22,7 @@ export const DAY_CHART = {
     partOfFortune: 77.6453, // 17°39′ Gemini
     obliquity: 23.4423661, // true obliquity, 23°26′32.52″
     outOfBounds: ['Uranus', 'Ceres'],
+    moonPhase: { phase: 'Crescent', elongation: 52.4533937, illuminatedFraction: 0.196208808 },
   },
 };
 
@@ -35,6 +36,7 @@ export const NIGHT_CHART = {
     sect: 'night',
     sunHouse: 4,
     partOfFortune: 141.0741, // 21°04′ Leo
+    moonPhase: { phase: 'Crescent', elongation: 46.2528185, illuminatedFraction: 0.154978200 },
   },
 };
 
@@ -48,6 +50,7 @@ export const PARTNER_CHART = {
     sect: 'day',
     sunHouse: 7,
     partOfFortune: 342.9174, // 12°55′ Pisces
+    moonPhase: { phase: 'Crescent', elongation: 67.6455373, illuminatedFraction: 0.311278704 },
   },
 };
 
@@ -63,6 +66,10 @@ export const SOUTHERN_CHART = {
     partOfFortune: 316.2748, // 16°16′ Aquarius
     obliquity: 23.4381391, // true obliquity - different from DAY_CHART's, so a hardcoded value fails here
     outOfBounds: [],
+    // Moon - Sun raw difference here is -179.3393279 (Moon at 180.5949902, Sun at
+    // 359.9343181) - negative, so this is the wrap case: it only lands at the correct
+    // positive elongation if normalized with (% 360 + 360) % 360 rather than left signed.
+    moonPhase: { phase: 'Full', elongation: 180.6606721, illuminatedFraction: 0.998544605 },
   },
 };
 

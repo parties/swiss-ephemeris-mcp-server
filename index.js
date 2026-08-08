@@ -20,6 +20,7 @@ import {
   parseHouseLine,
   parseChartPointLine,
 } from './lib/swetest-parse.js';
+import { moonPhase } from './lib/moon-phase.js';
 import {
   DEFAULT_ASPECT_BODIES,
   ANGLE_BODIES,
@@ -392,7 +393,9 @@ class SwissEphemerisServer {
       // -fPZSBD adds ecliptic latitude and declination; -l appends a decimal field, used to
       // read the true obliquity off the Ecl. Obl. row without relying on its zodiacal
       // encoding landing in Aries by luck (docs/SUP-345-declination-layer-spec.md §1.4).
-      const planetCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -p0123456789tADFGHIo -fPZSBDl -g, -head`;
+      // -fPZSBDl- (trailing -) appends illuminated fraction of the disc at the end, after
+      // every existing column, so none of the positional indices above shift.
+      const planetCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -p0123456789tADFGHIo -fPZSBDl- -g, -head`;
       let planetOutput;
       try {
         planetOutput = execSync(planetCmd, { encoding: 'utf8' });
@@ -487,7 +490,8 @@ class SwissEphemerisServer {
           ecliptic_latitude: planet.ecliptic_latitude,
           declination: planet.declination,
           out_of_bounds: outOfBounds,
-          out_of_bounds_by: outOfBoundsBy
+          out_of_bounds_by: outOfBoundsBy,
+          illuminated_fraction: planet.illuminated_fraction
         };
       });
 
@@ -640,6 +644,19 @@ class SwissEphemerisServer {
         },
         house_system: houseSystem
       };
+
+      // Instantaneous chart datum, not a time-domain event (SUP-353) - omitted rather than
+      // fabricated when Sun/Moon are unavailable (e.g. the missing-ephemeris path), same
+      // precedent as the ARMC declination omission and the placeholder-row drop above.
+      if (planets.Sun && planets.Moon) {
+        const phaseInfo = moonPhase(planets.Sun.longitude, planets.Moon.longitude);
+        result.moon_phase = {
+          phase: phaseInfo.phase,
+          elongation: phaseInfo.elongation,
+          illuminated_fraction: planets.Moon.illuminated_fraction,
+          phase_scheme: phaseInfo.phase_scheme
+        };
+      }
 
       if (missingEphemerisFiles.length > 0) {
         result.warnings = missingEphemerisFiles.map(
