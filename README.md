@@ -5,7 +5,7 @@ A Model Context Protocol (MCP) server that provides astronomical calculations us
 ## Features
 
 - **Planetary Positions**: Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn, Uranus, Neptune, Pluto
-- **Lunar Nodes**: True and Mean Node calculations
+- **Lunar Nodes**: True Node by default, Mean Node available via `node_type` - see [Lunar Node Type](#lunar-node-type)
 - **Asteroids**: Chiron, Ceres, Pallas, Juno, Vesta, Lilith
 - **Houses**: 12-house system using Placidus
 - **Chart Points**: Ascendant, Midheaven, IC, Descendant
@@ -69,15 +69,17 @@ Calculate astronomical data for a specific date, time, and location.
 - `latitude` (number): Latitude in decimal degrees (-90 to 90)
 - `longitude` (number): Longitude in decimal degrees (-180 to 180)
 - `house_system` (string, optional): House system code. Default `P`. See [House Systems](#house-systems).
+- `node_type` (string, optional): `"true"` (default) or `"mean"` Lunar Node. See [Lunar Node Type](#lunar-node-type).
 
 **Returns:**
 - `planets`: Positions of all planets and celestial bodies. Each entry has `longitude`, `sign`, `degree`, `speed`, `ecliptic_latitude` (decimal degrees, + = north of the ecliptic), `declination` (decimal degrees, + = north of the celestial equator), `out_of_bounds` (`true` when `|declination|` exceeds the obliquity of the date), and `out_of_bounds_by` (decimal degrees past the boundary when out of bounds, `null` otherwise). All 17 bodies carry all four fields uniformly, including North Node (`ecliptic_latitude: 0`, always in bounds). The Sun is hard-coded `out_of_bounds: false`: its ~0.5″ apparent ecliptic latitude (light-time and aberration) can push its apparent declination a fraction of an arcsecond past true obliquity right at a solstice, which would otherwise flag the body that defines the boundary as having left it.
 - `houses`: 12 astrological houses, each with `declination` in addition to `longitude`/`sign`/`degree`. No `ecliptic_latitude` or out-of-bounds fields — impossible for a latitude-0 point.
 - `chart_points`: Ascendant, Midheaven, IC, Descendant, Vertex, ARMC. All carry `declination` except ARMC — its declination column is a right ascension printed in zodiacal notation, not a real declination, so it's omitted rather than reported as a misleading `0`. IC and Descendant declinations are exact negations of Midheaven and Ascendant, matching how their longitudes are derived.
-- `additional_points`: South Node, Part of Fortune. South Node's `declination` is the exact negation of North Node's. Part of Fortune gets neither `ecliptic_latitude` nor `declination` — it's a longitude construct with no physical position, computed with the traditional day-chart formula (`Ascendant + Moon - Sun`) when the Sun is in houses 7-12, or the night-chart formula (`Ascendant + Sun - Moon`) when the Sun is in houses 1-6.
+- `additional_points`: South Node, Part of Fortune. South Node's `declination` is the exact negation of North Node's, and follows the same `node_type`. Part of Fortune gets neither `ecliptic_latitude` nor `declination` — it's a longitude construct with no physical position, computed with the traditional day-chart formula (`Ascendant + Moon - Sun`) when the Sun is in houses 7-12, or the night-chart formula (`Ascendant + Sun - Moon`) when the Sun is in houses 1-6.
 - `obliquity`: True obliquity of the ecliptic for the moment (mean obliquity plus nutation), in decimal degrees. Required to audit any `out_of_bounds` flag independently.
 - `obliquity_type`: Always `"true"` — the audit trail for every `out_of_bounds` flag, distinguishing it from the mean obliquity (differs by up to a few arcseconds).
 - `house_system`: The house system code actually used
+- `node_type`: The Lunar Node type actually used (`"true"` or `"mean"`) — labels `planets['North Node']` and `additional_points['South Node']`.
 - `warnings` (only present if something's missing): if an ephemeris data file needed for a body isn't found under `SE_EPHE_PATH`, that body is omitted from `planets` entirely rather than reported at a fabricated 0° Aries position, and a message naming the missing file is added here.
 
 ### `calculate_transits`
@@ -89,6 +91,7 @@ Calculate birth chart positions and current transits for comparison, including a
 - `latitude` (number): Birth latitude in decimal degrees
 - `longitude` (number): Birth longitude in decimal degrees
 - `house_system` (string, optional): House system code applied to both charts. Default `P`. See [House Systems](#house-systems).
+- `node_type` (string, optional): `"true"` (default) or `"mean"` Lunar Node, applied to both the natal chart and current transits. See [Lunar Node Type](#lunar-node-type).
 - `include_minor` (boolean, optional): Include minor aspects in `transit_aspects`. Default `false`.
 - `include_angles` (boolean, optional): Include the NATAL chart angles (Ascendant, Midheaven, IC, Descendant, Part of Fortune) in `transit_aspects`. Transiting angles are always excluded, even if requested via `bodies`: they are artifacts of the moment's location and time of day (the transiting Ascendant sweeps the whole zodiac daily), so transit-side angle contacts change minute to minute and carry no meaning. Default `false`.
 - `include_south_node` (boolean, optional): Include South Node in `transit_aspects`. Default `false`.
@@ -101,7 +104,7 @@ Calculate birth chart positions and current transits for comparison, including a
 - `natal_chart`: Complete birth chart data
 - `current_transits`: Current planetary positions
 - `transit_aspects`: Array of aspects from transiting bodies to the natal chart, sorted by orb ascending. Each entry has `transiting_body`, `natal_body`, `aspect`, `category`, `orb`, `exact_angle`, `applying`.
-- `settings_used`: The resolved settings (including `orb_model`) actually applied to `transit_aspects`.
+- `settings_used`: The resolved settings (including `orb_model` and `node_type`) actually applied to `transit_aspects`.
 - `calculation_time`: Timestamp of transit calculation
 
 ### `calculate_solar_revolution`
@@ -116,6 +119,7 @@ Calculate solar return chart for a specific year (when Sun returns to natal posi
 - `return_latitude` (number, optional): Solar return location latitude
 - `return_longitude` (number, optional): Solar return location longitude
 - `house_system` (string, optional): House system code applied to both natal and solar return charts. Default `P`. See [House Systems](#house-systems).
+- `node_type` (string, optional): `"true"` (default) or `"mean"` Lunar Node, applied to both the natal and solar return charts. See [Lunar Node Type](#lunar-node-type).
 
 **Returns:**
 - `natal_chart`: Original birth chart data
@@ -137,6 +141,7 @@ Calculate synastry chart between two people for relationship compatibility analy
 - `person2_longitude` (number): Person 2 birth longitude in decimal degrees
 - `person1_house_system` (string, optional): House system code for person 1. Default `P`. See [House Systems](#house-systems).
 - `person2_house_system` (string, optional): House system code for person 2. Default `P`.
+- `node_type` (string, optional): `"true"` (default) or `"mean"` Lunar Node, applied to both charts. Unlike `person1_house_system`/`person2_house_system`, this is a single value for both people — which node you use is definitional, not a per-chart display choice, so it must match on both sides of the comparison. See [Lunar Node Type](#lunar-node-type).
 - `include_minor` (boolean, optional): Include minor aspects. Default `false`.
 - `include_angles` (boolean, optional): Also compute `angle_aspects` (planet-to-angle and angle-to-angle contacts). Default `false`.
 - `include_vertex` (boolean, optional): Include the Vertex in `angle_aspects` (planet-to-Vertex and Vertex-to-Vertex contacts across the two charts). Default `false`, independent of `include_angles` — setting this alone still produces an `angle_aspects` array, containing only Vertex contacts.
@@ -168,11 +173,12 @@ Calculate natal chart aspects for a given datetime and coordinates. Returns plan
 - `orb_overrides` (object, optional): Per-aspect orb overrides in degrees, e.g. `{"conjunction": 10}`. Also accepts a per-class shape, e.g. `{"angle": {"square": 4}}` or `{"derived": {"square": 2}}`, to move only the `angle` class (Ascendant/Midheaven/IC/Descendant) or `derived` class (Part of Fortune, Vertex) without touching `body`. `angle` defaults to 5/4/3/1.5/1.5/1 deg (conjunction-opposition/square/trine-sextile/semisextile-quincunx/semisquare-sesquiquadrate/quintile-biquintile); `derived` defaults to 3/2/2/1 deg (conjunction-opposition/square/trine-sextile/all minors) — both tighter than `body`'s defaults.
 - `orb_model` (string, optional): Orb resolution model. `"moiety"` (default) sums each body's half-orb (per-body table, e.g. Sun 7.5°, Moon 6°, Ascendant 2.5°) and scales by the aspect's multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under `"moiety"`, `orb_overrides` takes a different two-knob shape instead: `{"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}` — `moieties` keys are body/point names, `multipliers` keys are aspect names. `"class"` instead uses the fixed per-class tables above and honors `orb_overrides`. See [Orb Models](#orb-models) for moiety provenance and why sextile stays a major aspect.
 - `house_system` (string, optional): House system code. Default `P`. See [House Systems](#house-systems).
+- `node_type` (string, optional): `"true"` (default) or `"mean"` Lunar Node. See [Lunar Node Type](#lunar-node-type).
 
 **Returns:**
-- All fields from `calculate_planetary_positions` (`planets`, `houses`, `chart_points`, `additional_points`, `obliquity`, `obliquity_type`, `datetime`, `coordinates`, `house_system`)
+- All fields from `calculate_planetary_positions` (`planets`, `houses`, `chart_points`, `additional_points`, `obliquity`, `obliquity_type`, `datetime`, `coordinates`, `house_system`, `node_type`)
 - `aspects`: Array of qualifying aspects, sorted by orb ascending. Each entry has `body_a`, `body_b`, `aspect`, `category` (`major`/`minor`), `aspect_angle`, `separation`, `orb`, `orb_allowed`, and `applying` (`true`/`false`/`null` — `null` when applying/separating cannot be determined, e.g. angle points with no speed, near-stationary bodies, or an exact hit).
-- `settings_used`: The resolved settings (`include_minor_aspects`, `include_angles`, `include_south_node`, `include_vertex`, `bodies`, `orb_overrides`, `orb_model`) actually applied to the calculation.
+- `settings_used`: The resolved settings (`include_minor_aspects`, `include_angles`, `include_south_node`, `include_vertex`, `bodies`, `orb_overrides`, `orb_model`, `node_type`) actually applied to the calculation.
 
 ### Angle Aspects
 
@@ -238,6 +244,23 @@ Any tool that computes houses accepts an optional `house_system` code (default `
 | `T` | Polich/Page (Topocentric) |
 
 An unknown code returns an `InvalidParams` error listing the valid codes.
+
+## Lunar Node Type
+
+Every tool that returns a Node accepts an optional `node_type` code (default `"true"`):
+
+| Code | Node | Behavior |
+|------|------|----------|
+| `true` (default) | True (osculating) Node | Follows the Moon's actual, instantaneous orbital plane. Oscillates and can briefly reverse direction (go "direct") before resuming its normal retrograde motion. |
+| `mean` | Mean Node | The smoothed, secular position with the periodic oscillation averaged out. Moves monotonically retrograde, roughly -3′11″/day, with no reversals. |
+
+`true` is the default because it matches what most modern Western tools (astro.com, Solar Fire) return when a caller doesn't specify — the *default* is not in question, only its label was missing. The two differ by roughly 1-2° at any given moment, which is enough to shift the Node's sign or move a Node aspect in or out of orb; they are not interchangeable. `node_type` also determines South Node (its exact opposite) and any Node-derived aspect.
+
+Reach for `mean` when you want a monotonic, non-oscillating reference point — for example, tracking Node ingresses or stations over time. The true Node's wobble means it can cross a sign boundary, reverse, and cross back within days, which reads as noise rather than a real ingress in most time-domain use cases.
+
+The resolved value is echoed back: as `node_type` directly on any returned chart (`calculate_planetary_positions`, `calculate_solar_revolution`'s `natal_chart`/`solar_return_chart`, `calculate_synastry`'s `person1_chart`/`person2_chart`), and as `settings_used.node_type` wherever the tool already returns a `settings_used` block (`calculate_aspects`, `calculate_transits`). `calculate_synastry`/`calculate_transits` take a single `node_type` for the whole call rather than one per chart — which node you're using is definitional, not a per-chart display choice, so both sides of a comparison must agree.
+
+An unknown value returns an `InvalidParams` error listing the valid codes.
 
 ## Contributing
 

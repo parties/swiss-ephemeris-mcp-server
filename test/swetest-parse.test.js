@@ -58,6 +58,31 @@ test('parsePlanetLine: Ecl. Obl. is parsed as an obliquity reading, not a body p
   assert.equal(result.declination, undefined);
 });
 
+// SUP-353: -fPZSBDl- appends illuminated fraction (field 7 / index 6) after the decimal
+// longitude, so the pre-existing speed/latitude/declination/longitude indices don't move.
+// Captured from `swetest -b01.01.1990 -ut12:00:00 -p0123456789tADFGHIo -fPZSBDl- -g, -head`
+// (DAY_CHART).
+test('parsePlanetLine: -fPZSBDl- adds illuminated_fraction as field 7', () => {
+  const result = parsePlanetLine("Moon           , 3 pi 16' 3.5563,  13°28'12.4956,   1°28'14.4283,  -8°56'12.6510, 333.2676545,     0.196208808");
+  assert.equal(result.name, 'Moon');
+  assert.ok(Math.abs(result.longitude - 333.2676545) < 1e-6);
+  assert.ok(Math.abs(result.declination - -(8 + 56 / 60 + 12.6510 / 3600)) < 1e-6);
+  assert.ok(Math.abs(result.illuminated_fraction - 0.196208808) < 1e-9);
+});
+
+test('parsePlanetLine: no field 7 -> illuminated_fraction undefined', () => {
+  const result = parsePlanetLine("Sun            ,10 cp 48'51.3388,   1° 1'10.1129,   0° 0' 0.0460, -23° 0' 6.6992, 280.8142608");
+  assert.equal(result.illuminated_fraction, undefined);
+});
+
+// The Ecl. Obl. pseudo-row prints literal 'nan' in the phase column when -* is present too;
+// even though that row returns before reaching this field today, the guard must drop a
+// non-finite reading rather than leak NaN into a real body if the format string ever changes.
+test('parsePlanetLine: non-finite field 7 becomes illuminated_fraction undefined, not NaN', () => {
+  const result = parsePlanetLine("Sun            ,10 cp 48'51.3388,   1° 1'10.1129,   0° 0' 0.0460, -23° 0' 6.6992, 280.8142608,           nan");
+  assert.equal(result.illuminated_fraction, undefined);
+});
+
 // Captured from `swetest -b01.01.1990 -ut12:00:00 -house0.0,51.4769,P -fPZSBD -g, -head`
 // (DAY_CHART). House/angle lines have only four columns — spec §1.1's core trap.
 test('parseHouseLine: four-column layout puts declination in field 4, not a latitude field', () => {

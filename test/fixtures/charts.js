@@ -22,6 +22,8 @@ export const DAY_CHART = {
     partOfFortune: 77.6453, // 17°39′ Gemini
     obliquity: 23.4423661, // true obliquity, 23°26′32.52″
     outOfBounds: ['Uranus', 'Ceres'],
+    trueNodeLongitude: 316.8703610, // 16°52′ Aquarius - default node_type (SUP-352)
+    moonPhase: { phase: 'Crescent', elongation: 52.4533937, illuminatedFraction: 0.196208808 },
     // SUP-350 find_events engine — window 2026-01-01 .. 2029-01-01, default transiting
     // set, moiety orbs (spec §4.1/§4.2/§4.9).
     plutoSquareLilithPasses: 5,
@@ -40,6 +42,7 @@ export const NIGHT_CHART = {
     sect: 'night',
     sunHouse: 4,
     partOfFortune: 141.0741, // 21°04′ Leo
+    moonPhase: { phase: 'Crescent', elongation: 46.2528185, illuminatedFraction: 0.154978200 },
   },
 };
 
@@ -53,6 +56,7 @@ export const PARTNER_CHART = {
     sect: 'day',
     sunHouse: 7,
     partOfFortune: 342.9174, // 12°55′ Pisces
+    moonPhase: { phase: 'Crescent', elongation: 67.6455373, illuminatedFraction: 0.311278704 },
   },
 };
 
@@ -68,6 +72,10 @@ export const SOUTHERN_CHART = {
     partOfFortune: 316.2748, // 16°16′ Aquarius
     obliquity: 23.4381391, // true obliquity - different from DAY_CHART's, so a hardcoded value fails here
     outOfBounds: [],
+    // Moon - Sun raw difference here is -179.3393279 (Moon at 180.5949902, Sun at
+    // 359.9343181) - negative, so this is the wrap case: it only lands at the correct
+    // positive elongation if normalized with (% 360 + 360) % 360 rather than left signed.
+    moonPhase: { phase: 'Full', elongation: 180.6606721, illuminatedFraction: 0.998544605 },
   },
 };
 
@@ -86,6 +94,22 @@ export const WHOLE_SIGN_EDGE_CHART = {
     sect: 'day',
     sunHouse: 12,
     partOfFortune: 327.161505, // 27°10′ Aquarius (Placidus; house-system-invariant per SUP-274)
+  },
+};
+
+/**
+ * SUP-352: true/mean Node divergence case. `swetest`'s true (osculating) Node wobbles
+ * around the smoothed mean Node; this date was picked because the two are about 1.7deg
+ * apart here, matching the order of magnitude the ticket was filed against.
+ */
+export const NODE_DIVERGENCE_CHART = {
+  label: 'node divergence chart (Greenwich, 2026)',
+  datetime: '2026-07-01T12:00:00Z',
+  latitude: 51.4769,
+  longitude: 0.0,
+  expected: {
+    trueNodeLongitude: 330.82186044444444, // 0°49' Pisces
+    meanNodeLongitude: 332.56042872222224, // 2°34' Pisces
   },
 };
 
