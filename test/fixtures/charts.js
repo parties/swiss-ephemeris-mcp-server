@@ -22,6 +22,7 @@ export const DAY_CHART = {
     partOfFortune: 77.6453, // 17°39′ Gemini
     obliquity: 23.4423661, // true obliquity, 23°26′32.52″
     outOfBounds: ['Uranus', 'Ceres'],
+    trueNodeLongitude: 316.8703610, // 16°52′ Aquarius - default node_type (SUP-352)
   },
 };
 
@@ -81,6 +82,22 @@ export const WHOLE_SIGN_EDGE_CHART = {
     sect: 'day',
     sunHouse: 12,
     partOfFortune: 327.161505, // 27°10′ Aquarius (Placidus; house-system-invariant per SUP-274)
+  },
+};
+
+/**
+ * SUP-352: true/mean Node divergence case. `swetest`'s true (osculating) Node wobbles
+ * around the smoothed mean Node; this date was picked because the two are about 1.7deg
+ * apart here, matching the order of magnitude the ticket was filed against.
+ */
+export const NODE_DIVERGENCE_CHART = {
+  label: 'node divergence chart (Greenwich, 2026)',
+  datetime: '2026-07-01T12:00:00Z',
+  latitude: 51.4769,
+  longitude: 0.0,
+  expected: {
+    trueNodeLongitude: 330.82186044444444, // 0°49' Pisces
+    meanNodeLongitude: 332.56042872222224, // 2°34' Pisces
   },
 };
 

@@ -40,6 +40,21 @@ function validateOrbModel(orbModel) {
   }
 }
 
+// Lunar Node type requested from swetest: "true" (default) is the osculating node, which
+// wobbles and can reverse direction; "mean" is smoothed and moves monotonically retrograde.
+// They differ by roughly 1-2 degrees at any given moment (SUP-352). One value applies per
+// call, never per-chart - which node you use is definitional (like which body you're
+// tracking), not a display choice, so synastry/transits must match on both sides.
+const NODE_TYPE_CODES = { true: 't', mean: 'm' };
+
+function validateNodeType(nodeType) {
+  if (nodeType === undefined) return 'true';
+  if (typeof nodeType !== 'string' || !NODE_TYPE_CODES[nodeType]) {
+    throw new McpError(ErrorCode.InvalidParams, `node_type must be one of: ${Object.keys(NODE_TYPE_CODES).join(', ')}`);
+  }
+  return nodeType;
+}
+
 // House-overlay only (SUP-263) - the aspect grid and angle-aspect planet side use the wider
 // DEFAULT_ASPECT_BODIES list instead; overlaying 17 bodies into 12 houses is noisier.
 const SYNASTRY_BODIES = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto'];
@@ -122,6 +137,11 @@ class SwissEphemerisServer {
                   type: 'string',
                   description: 'House system code: P=Placidus (default), K=Koch, O=Porphyry, R=Regiomontanus, C=Campanus, E=Equal, W=Whole Sign, B=Alcabitus, M=Morinus, T=Topocentric.',
                 },
+                node_type: {
+                  type: 'string',
+                  enum: ['true', 'mean'],
+                  description: 'Lunar Node type: "true" (default) is the true/osculating Node, which wobbles and can reverse direction. "mean" is the smoothed mean Node, which moves monotonically retrograde. The two differ by roughly 1-2 degrees at any given time - enough to change a sign or move a node aspect in or out of orb. Applies to North Node, South Node, and any node-derived aspect. Echoed back as `node_type` on the result.',
+                },
               },
               required: ['datetime', 'latitude', 'longitude'],
             },
@@ -147,6 +167,11 @@ class SwissEphemerisServer {
                 house_system: {
                   type: 'string',
                   description: 'House system code: P=Placidus (default), K=Koch, O=Porphyry, R=Regiomontanus, C=Campanus, E=Equal, W=Whole Sign, B=Alcabitus, M=Morinus, T=Topocentric.',
+                },
+                node_type: {
+                  type: 'string',
+                  enum: ['true', 'mean'],
+                  description: 'Lunar Node type applied to both the natal chart and current transits: "true" (default) is the true/osculating Node, which wobbles and can reverse direction. "mean" is the smoothed mean Node, which moves monotonically retrograde. The two differ by roughly 1-2 degrees at any given time. One value applies to both charts - it is definitional, not a per-chart display choice, so a natal Node and a transiting Node must be the same kind to compare meaningfully. Echoed back as `settings_used.node_type`.',
                 },
                 include_minor: {
                   type: 'boolean',
@@ -217,6 +242,11 @@ class SwissEphemerisServer {
                   type: 'string',
                   description: 'House system code applied to both natal and solar return charts: P=Placidus (default), K=Koch, O=Porphyry, R=Regiomontanus, C=Campanus, E=Equal, W=Whole Sign, B=Alcabitus, M=Morinus, T=Topocentric.',
                 },
+                node_type: {
+                  type: 'string',
+                  enum: ['true', 'mean'],
+                  description: 'Lunar Node type applied to both the natal and solar return charts: "true" (default) is the true/osculating Node, which wobbles and can reverse direction. "mean" is the smoothed mean Node, which moves monotonically retrograde. The two differ by roughly 1-2 degrees at any given time. Echoed back as `node_type` on each chart.',
+                },
               },
               required: ['birth_datetime', 'birth_latitude', 'birth_longitude', 'return_year'],
             },
@@ -286,6 +316,11 @@ class SwissEphemerisServer {
                   type: 'string',
                   description: 'House system code for person 2: P=Placidus (default), K=Koch, O=Porphyry, R=Regiomontanus, C=Campanus, E=Equal, W=Whole Sign, B=Alcabitus, M=Morinus, T=Topocentric.',
                 },
+                node_type: {
+                  type: 'string',
+                  enum: ['true', 'mean'],
+                  description: 'Lunar Node type applied to both charts: "true" (default) is the true/osculating Node, which wobbles and can reverse direction. "mean" is the smoothed mean Node, which moves monotonically retrograde. The two differ by roughly 1-2 degrees at any given time. Unlike `person1_house_system`/`person2_house_system`, there is a single `node_type` for both people, not one per person - which node you use is definitional, not a display choice, so it must match on both sides of the comparison. Echoed back as `node_type` on each chart.',
+                },
               },
               required: ['person1_datetime', 'person1_latitude', 'person1_longitude', 'person2_datetime', 'person2_latitude', 'person2_longitude'],
             },
@@ -343,6 +378,11 @@ class SwissEphemerisServer {
                   type: 'string',
                   description: 'House system code: P=Placidus (default), K=Koch, O=Porphyry, R=Regiomontanus, C=Campanus, E=Equal, W=Whole Sign, B=Alcabitus, M=Morinus, T=Topocentric.',
                 },
+                node_type: {
+                  type: 'string',
+                  enum: ['true', 'mean'],
+                  description: 'Lunar Node type: "true" (default) is the true/osculating Node, which wobbles and can reverse direction. "mean" is the smoothed mean Node, which moves monotonically retrograde. The two differ by roughly 1-2 degrees at any given time - enough to change a sign or move a node aspect in or out of orb. Applies to North Node, South Node, and any node-derived aspect. Echoed back as `settings_used.node_type`.',
+                },
               },
               required: ['datetime', 'latitude', 'longitude'],
             },
@@ -376,7 +416,7 @@ class SwissEphemerisServer {
     });
   }
 
-  calculateEphemeris(datetime, latitude, longitude, houseSystem = 'P') {
+  calculateEphemeris(datetime, latitude, longitude, houseSystem = 'P', nodeType = 'true') {
     try {
       const date = new Date(datetime);
       if (isNaN(date.getTime())) {
@@ -388,11 +428,14 @@ class SwissEphemerisServer {
       const ephePath = process.env.SE_EPHE_PATH || DEFAULT_EPHE_PATH;
 
       // Execute swetest for planets, including asteroids and additional points
-      // 0123456789 = Sun through Pluto, t = true Node, A = mean Apogee (Lilith), D = Chiron, F = Ceres, G = Pallas, H = Juno, I = Vesta, o = obliquity (Ecl. Obl. pseudo-body)
+      // 0123456789 = Sun through Pluto, t/m = true/mean Node (node_type param, see
+      // NODE_TYPE_CODES), A = mean Apogee (Lilith), D = Chiron, F = Ceres, G = Pallas, H = Juno,
+      // I = Vesta, o = obliquity (Ecl. Obl. pseudo-body)
       // -fPZSBD adds ecliptic latitude and declination; -l appends a decimal field, used to
       // read the true obliquity off the Ecl. Obl. row without relying on its zodiacal
       // encoding landing in Aries by luck (docs/SUP-345-declination-layer-spec.md §1.4).
-      const planetCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -p0123456789tADFGHIo -fPZSBDl -g, -head`;
+      const nodeCode = NODE_TYPE_CODES[nodeType] || NODE_TYPE_CODES.true;
+      const planetCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -p0123456789${nodeCode}ADFGHIo -fPZSBDl -g, -head`;
       let planetOutput;
       try {
         planetOutput = execSync(planetCmd, { encoding: 'utf8' });
@@ -638,7 +681,8 @@ class SwissEphemerisServer {
           latitude,
           longitude
         },
-        house_system: houseSystem
+        house_system: houseSystem,
+        node_type: nodeType
       };
 
       if (missingEphemerisFiles.length > 0) {
@@ -754,6 +798,7 @@ class SwissEphemerisServer {
         bodies: requestedBodies,
         orb_overrides: orbOverrides,
         orb_model: orbModel,
+        node_type: ephemerisResult.node_type,
       },
     };
   }
@@ -816,6 +861,7 @@ class SwissEphemerisServer {
         bodies: requestedBodies,
         orb_overrides: orbOverrides,
         orb_model: orbModel,
+        node_type: natalChart.node_type,
       },
     };
   }
@@ -918,7 +964,7 @@ class SwissEphemerisServer {
   async handleToolCall(name, args) {
     switch (name) {
       case 'calculate_planetary_positions':
-        const { datetime, latitude, longitude, house_system } = args;
+        const { datetime, latitude, longitude, house_system, node_type: pp_node_type } = args;
 
         if (!datetime || typeof datetime !== 'string') {
           throw new McpError(
@@ -941,7 +987,7 @@ class SwissEphemerisServer {
           );
         }
 
-        return this.calculateEphemeris(datetime, latitude, longitude, validateHouseSystem(house_system));
+        return this.calculateEphemeris(datetime, latitude, longitude, validateHouseSystem(house_system), validateNodeType(pp_node_type));
 
       case 'calculate_transits':
         const {
@@ -949,6 +995,7 @@ class SwissEphemerisServer {
           latitude: birth_latitude,
           longitude: birth_longitude,
           house_system: transit_house_system,
+          node_type: transit_node_type,
           include_minor: transit_include_minor,
           include_angles: transit_include_angles,
           include_south_node: transit_include_south_node,
@@ -1006,14 +1053,15 @@ class SwissEphemerisServer {
         validateOrbModel(transit_orb_model);
 
         const validatedTransitHouseSystem = validateHouseSystem(transit_house_system);
+        const validatedTransitNodeType = validateNodeType(transit_node_type);
 
         // Calculate birth chart
-        const natalChart = this.calculateEphemeris(birth_datetime, birth_latitude, birth_longitude, validatedTransitHouseSystem);
+        const natalChart = this.calculateEphemeris(birth_datetime, birth_latitude, birth_longitude, validatedTransitHouseSystem, validatedTransitNodeType);
 
          // Calculate current transits
          const currentDate = new Date();
          const currentISOString = currentDate.toISOString();
-         const currentEphemeris = this.calculateEphemeris(currentISOString, birth_latitude, birth_longitude, validatedTransitHouseSystem);
+         const currentEphemeris = this.calculateEphemeris(currentISOString, birth_latitude, birth_longitude, validatedTransitHouseSystem, validatedTransitNodeType);
 
          const { aspects: transitAspects, settings_used: transitSettingsUsed } = this.calculateTransitAspects(natalChart, currentEphemeris, {
            includeMinor: transit_include_minor,
@@ -1034,7 +1082,7 @@ class SwissEphemerisServer {
          };
 
       case 'calculate_solar_revolution':
-        const { birth_datetime: sr_birth_datetime, birth_latitude: sr_birth_latitude, birth_longitude: sr_birth_longitude, return_year, return_latitude, return_longitude, house_system: sr_house_system } = args;
+        const { birth_datetime: sr_birth_datetime, birth_latitude: sr_birth_latitude, birth_longitude: sr_birth_longitude, return_year, return_latitude, return_longitude, house_system: sr_house_system, node_type: sr_node_type } = args;
 
         if (!sr_birth_datetime || typeof sr_birth_datetime !== 'string') {
           throw new McpError(
@@ -1065,9 +1113,10 @@ class SwissEphemerisServer {
         }
 
         const validatedSrHouseSystem = validateHouseSystem(sr_house_system);
+        const validatedSrNodeType = validateNodeType(sr_node_type);
 
         // Calculate birth chart to get natal Sun position
-        const srNatalChart = this.calculateEphemeris(sr_birth_datetime, sr_birth_latitude, sr_birth_longitude, validatedSrHouseSystem);
+        const srNatalChart = this.calculateEphemeris(sr_birth_datetime, sr_birth_latitude, sr_birth_longitude, validatedSrHouseSystem, validatedSrNodeType);
         const natalSunLongitude = srNatalChart.planets.Sun.longitude;
 
         // Calculate solar return chart for the given year
@@ -1080,7 +1129,7 @@ class SwissEphemerisServer {
         const returnLon = return_longitude !== undefined ? return_longitude : sr_birth_longitude;
 
         // Calculate the solar return chart at the approximate return date
-        const solarReturnChart = this.calculateEphemeris(returnDate.toISOString(), returnLat, returnLon, validatedSrHouseSystem);
+        const solarReturnChart = this.calculateEphemeris(returnDate.toISOString(), returnLat, returnLon, validatedSrHouseSystem, validatedSrNodeType);
 
         return {
           natal_chart: srNatalChart,
@@ -1094,7 +1143,8 @@ class SwissEphemerisServer {
               latitude: returnLat,
               longitude: returnLon
             },
-            house_system: validatedSrHouseSystem
+            house_system: validatedSrHouseSystem,
+            node_type: validatedSrNodeType
           },
           natal_sun_longitude: natalSunLongitude,
           return_sun_longitude: solarReturnChart.planets.Sun.longitude,
@@ -1102,7 +1152,7 @@ class SwissEphemerisServer {
         };
 
       case 'calculate_synastry':
-        const { person1_datetime, person1_latitude, person1_longitude, person2_datetime, person2_latitude, person2_longitude, include_minor: synastry_include_minor, include_angles: synastry_include_angles, include_vertex: synastry_include_vertex, bodies: synastry_bodies, orb_overrides: synastry_orb_overrides, orb_model: synastry_orb_model, person1_house_system, person2_house_system } = args;
+        const { person1_datetime, person1_latitude, person1_longitude, person2_datetime, person2_latitude, person2_longitude, include_minor: synastry_include_minor, include_angles: synastry_include_angles, include_vertex: synastry_include_vertex, bodies: synastry_bodies, orb_overrides: synastry_orb_overrides, orb_model: synastry_orb_model, person1_house_system, person2_house_system, node_type: synastry_node_type } = args;
 
         if (synastry_include_minor !== undefined && typeof synastry_include_minor !== 'boolean') {
           throw new McpError(ErrorCode.InvalidParams, 'include_minor must be a boolean');
@@ -1132,6 +1182,7 @@ class SwissEphemerisServer {
         }
 
         validateOrbModel(synastry_orb_model);
+        const validatedSynastryNodeType = validateNodeType(synastry_node_type);
 
         if (!person1_datetime || typeof person1_datetime !== 'string') {
           throw new McpError(
@@ -1176,10 +1227,10 @@ class SwissEphemerisServer {
         }
 
         // Calculate person 1's natal chart
-        const person1NatalChart = this.calculateEphemeris(person1_datetime, person1_latitude, person1_longitude, validateHouseSystem(person1_house_system, 'person1_house_system'));
+        const person1NatalChart = this.calculateEphemeris(person1_datetime, person1_latitude, person1_longitude, validateHouseSystem(person1_house_system, 'person1_house_system'), validatedSynastryNodeType);
 
         // Calculate person 2's natal chart
-        const person2NatalChart = this.calculateEphemeris(person2_datetime, person2_latitude, person2_longitude, validateHouseSystem(person2_house_system, 'person2_house_system'));
+        const person2NatalChart = this.calculateEphemeris(person2_datetime, person2_latitude, person2_longitude, validateHouseSystem(person2_house_system, 'person2_house_system'), validatedSynastryNodeType);
 
         // Calculate aspects between the two charts
         const aspects = this.calculateSynastryAspects(person1NatalChart.planets, person2NatalChart.planets, {
@@ -1239,6 +1290,7 @@ class SwissEphemerisServer {
           orb_overrides,
           orb_model,
           house_system: aspects_house_system,
+          node_type: aspects_node_type,
         } = args;
 
         if (!aspects_datetime || typeof aspects_datetime !== 'string') {
@@ -1288,7 +1340,7 @@ class SwissEphemerisServer {
 
         validateOrbModel(orb_model);
 
-        const aspectsEphemerisResult = this.calculateEphemeris(aspects_datetime, aspects_latitude, aspects_longitude, validateHouseSystem(aspects_house_system));
+        const aspectsEphemerisResult = this.calculateEphemeris(aspects_datetime, aspects_latitude, aspects_longitude, validateHouseSystem(aspects_house_system), validateNodeType(aspects_node_type));
         const { aspects: chartAspects, settings_used } = this.calculateChartAspects(aspectsEphemerisResult, {
           includeMinor: include_minor,
           includeAngles: include_angles,
