@@ -49,7 +49,7 @@ const NODE_TYPE_CODES = { true: 't', mean: 'm' };
 
 function validateNodeType(nodeType) {
   if (nodeType === undefined) return 'true';
-  if (typeof nodeType !== 'string' || !NODE_TYPE_CODES[nodeType]) {
+  if (typeof nodeType !== 'string' || !Object.hasOwn(NODE_TYPE_CODES, nodeType)) {
     throw new McpError(ErrorCode.InvalidParams, `node_type must be one of: ${Object.keys(NODE_TYPE_CODES).join(', ')}`);
   }
   return nodeType;
@@ -434,7 +434,7 @@ class SwissEphemerisServer {
       // -fPZSBD adds ecliptic latitude and declination; -l appends a decimal field, used to
       // read the true obliquity off the Ecl. Obl. row without relying on its zodiacal
       // encoding landing in Aries by luck (docs/SUP-345-declination-layer-spec.md §1.4).
-      const nodeCode = NODE_TYPE_CODES[nodeType] || NODE_TYPE_CODES.true;
+      const nodeCode = Object.hasOwn(NODE_TYPE_CODES, nodeType) ? NODE_TYPE_CODES[nodeType] : NODE_TYPE_CODES.true;
       const planetCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -p0123456789${nodeCode}ADFGHIo -fPZSBDl -g, -head`;
       let planetOutput;
       try {

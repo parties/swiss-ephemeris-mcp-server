@@ -97,10 +97,13 @@ test('South Node follows the North Node node_type - true and mean differ by the 
 
 test('unknown node_type is rejected', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
-  await assert.rejects(
-    () => server.handleToolCall('calculate_planetary_positions', { ...REFERENCE_INPUT, node_type: 'osculating' }),
-    /node_type must be one of/
-  );
+  for (const nodeType of ['osculating', 'toString', 'constructor', '__proto__']) {
+    await assert.rejects(
+      () => server.handleToolCall('calculate_planetary_positions', { ...REFERENCE_INPUT, node_type: nodeType }),
+      /node_type must be one of/,
+      `node_type: '${nodeType}' should be rejected`
+    );
+  }
 });
 
 test('calculate_aspects settings_used.node_type reflects what was actually used', { skip: !HAS_SWETEST }, async () => {
