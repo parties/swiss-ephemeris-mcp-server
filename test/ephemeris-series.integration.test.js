@@ -41,6 +41,22 @@ test('seriesFor: one row per day across the window, inclusive of both ends', { s
   assert.equal(rows[rows.length - 1].jd, 2461051.5);
 });
 
+// Regression guard (PR #51 review): the old floor-based row count undershot whenever the
+// span wasn't an exact multiple of stepDays, silently dropping the final partial day. §3.1
+// allows window_start/window_end at different times of day, so a non-aligned window's last
+// row must land exactly on endJd - not stop short of it, and not overshoot past it either.
+test('seriesFor: non-day-aligned window lands the last row exactly on endJd, not short of it', { skip: !HAS_SWETEST }, () => {
+  const startJd = jd('2026-01-01T00:00:00Z');
+  const endJd = jd('2026-01-02T12:00:00Z'); // 1.5 days - not a multiple of the 1-day step
+  const rows = seriesFor('Mars', startJd, endJd, 1);
+
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].jd, startJd);
+  assert.equal(rows[1].jd, startJd + 1);
+  assert.equal(rows[rows.length - 1].jd, endJd);
+  assert.ok(rows.every((r) => r.jd <= endJd), 'no row may extend past endJd');
+});
+
 test('positionAt: agrees with the matching row from seriesFor at the same JD', { skip: !HAS_SWETEST }, () => {
   const rows = seriesFor('Pluto', jd('2026-06-01T00:00:00Z'), jd('2026-06-02T00:00:00Z'), 1);
   const point = positionAt('Pluto', rows[0].jd);

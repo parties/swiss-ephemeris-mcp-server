@@ -758,8 +758,14 @@ Transiting Neptune, DAY_CHART natal Pallas at **1.5595393** (1°33′34.3″ Ari
 | Station direct | **2026-12-12T22:17:19Z** at longitude **1.6129272** (1°36′46.5″ Aries) |
 | Gap to natal Pallas at that station | **0.0533879° = 3′12.2″** |
 | Station's `natal_contacts` | contains `Pallas / conjunction`, orb 0.0533879 |
-| Exact passes in the conjunction contact | **exactly 1** (2026-02, direct) — not 3 |
-| `closest_approach.stationary` | `true` for the second approach |
+| Exact passes in the conjunction contact | **exactly 1** (**2026-03-14T22:57:21Z**, direct) — not 3 |
+| `closest_approach.stationary` | **`false`** — the exact pass (orb 0) is unbeatable by Q4's own algorithm |
+
+> **Corrected 2026-08-08**, verified independently against the vendored ephemeris: the exact
+> pass is **2026-03-14T22:57:21Z**, not the "(2026-02)" placeholder above, and
+> `closest_approach.stationary` is **`false`** for this contact, not `true` — a real exact pass
+> (orb 0) always wins over a station that only gets to within 0.053°, and the original text
+> contradicted Q4's own "candidate set is exact passes, stations, and window boundaries" rule.
 
 This is the case that fails if the implementation assumes an outer planet inside orb across a
 retrograde produces three passes.
