@@ -58,7 +58,7 @@ npm start
 
 ## Usage
 
-The server provides five main tools:
+The server provides six main tools:
 
 ### `calculate_planetary_positions`
 
@@ -179,6 +179,37 @@ Calculate natal chart aspects for a given datetime and coordinates. Returns plan
 - All fields from `calculate_planetary_positions` (`planets`, `houses`, `chart_points`, `additional_points`, `obliquity`, `obliquity_type`, `datetime`, `coordinates`, `house_system`, `node_type`)
 - `aspects`: Array of qualifying aspects, sorted by orb ascending. Each entry has `body_a`, `body_b`, `aspect`, `category` (`major`/`minor`), `aspect_angle`, `separation`, `orb`, `orb_allowed`, and `applying` (`true`/`false`/`null` — `null` when applying/separating cannot be determined, e.g. angle points with no speed, near-stationary bodies, or an exact hit).
 - `settings_used`: The resolved settings (`include_minor_aspects`, `include_angles`, `include_south_node`, `include_vertex`, `bodies`, `orb_overrides`, `orb_model`, `node_type`) actually applied to the calculation.
+
+### `calculate_secondary_progressions`
+
+Calculate secondary progressions (the "day for a year" technique): progressed planetary positions, a correctly-derived progressed Ascendant/Midheaven/IC/Descendant, progressed houses, and aspects from the progressed bodies to the natal chart.
+
+This exists because the angles of a plain `calculate_planetary_positions` call at the progressed clock instant are not progressed angles under any convention — they're the angles of a real moment days after birth, off by hundreds of degrees from either progression convention. This tool instead directs the natal Midheaven along the ecliptic by the chosen arc and converts that to a right ascension (ARMC) before deriving houses, which is the piece that needs the house-cusp machinery and can't be done from outside the server.
+
+**Parameters:**
+- `birth_datetime` (string): Birth datetime in ISO8601 format
+- `birth_latitude` (number): Birth latitude in decimal degrees
+- `birth_longitude` (number): Birth longitude in decimal degrees
+- `target_date` (string): ISO8601 datetime to progress to. The real elapsed time between `birth_datetime` and this date, expressed in tropical years (`year_length_days` = 365.2422), is converted 1 year = 1 day and added to `birth_datetime` to get the progressed instant, returned as `progressed_datetime`.
+- `house_system` (string, optional): House system code, applied to both the natal chart and the progressed houses. Default `P`. See [House Systems](#house-systems).
+- `angle_method` (string, optional): `"solar_arc"` (default) directs the Midheaven by (progressed Sun longitude − natal Sun longitude), which self-corrects for the Sun's actual non-mean motion. `"naibod"` uses a mean rate of 360/`year_length_days` degrees per elapsed year instead. Both direct the *ecliptic* Midheaven, not the ARMC/right ascension directly — the two conventions diverge from each other by roughly a degree per few decades of age. An unrecognized value throws `InvalidParams` rather than silently defaulting; `"ephemeris_time"` (the raw clock-time angles) is deliberately not offered, since naming it invites the exact bug this tool exists to fix.
+- `house_frame` (string, optional): `"progressed"` (default) or `"natal"` — which house cusps to report as `progressed_houses` and use for house placement of progressed bodies. `progressed_angles` are always the arc-directed progressed values regardless of this setting.
+- `bodies` (array of strings, optional): Override the default body list (defaults to the same list as `calculate_transits`: Sun..Pluto, North Node, Lilith, Chiron, Ceres, Pallas, Juno, Vesta). Applies to `progressed_planets` and the progressed side of `aspects_to_natal`.
+- `include_minor` (boolean, optional): Include minor aspects in `aspects_to_natal`. Default `false`.
+- `include_angles` (boolean, optional): Include progressed Ascendant/Midheaven as aspectable bodies on the progressed side of `aspects_to_natal`, and natal Ascendant/Midheaven/Part of Fortune on the natal side. Default `true` — unlike `calculate_transits`/`calculate_synastry`, this defaults on: progressed angle contacts are this tool's headline output, and unlike a transiting Ascendant (which sweeps the whole zodiac daily and means nothing), the progressed Ascendant/Midheaven stay meaningful. Progressed Part of Fortune is never included on the progressed side regardless of this flag — which day/night formula applies to a progressed sect is unsettled.
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees for `aspects_to_natal`, e.g. `{"conjunction": 10}`. Also accepts the per-class shape (`{"angle": {...}}` / `{"derived": {...}}`) described under `calculate_transits` above. The default orb tables are transit-scaled; the conventional orb for progressed aspects is tighter, around 1 degree, so callers doing serious progressions work will usually want to tighten these.
+
+**Returns:**
+- `progressed_datetime`: The birth-plus-elapsed-years instant actually used
+- `elapsed_years`: Fractional tropical years between `birth_datetime` and `target_date`
+- `year_length_days`: The year length used to derive `elapsed_years` and the Naibod rate (365.2422)
+- `progressed_planets`: `{ <body>: { longitude, sign, degree, speed, retrograde } }` for the requested bodies. `retrograde` is surfaced explicitly rather than left for callers to infer from the sign of `speed`.
+- `progressed_houses`: The 12 house cusps selected by `house_frame`
+- `progressed_angles`: `{ Ascendant, Midheaven, IC, Descendant }`, always the arc-directed progressed values
+- `angle_method_used`, `house_frame_used`: The resolved settings actually applied
+- `aspects_to_natal`: Array of aspects from the progressed bodies to the natal chart. Each entry has `progressed_body`, `natal_body`, `aspect`, `category`, `orb`, `exact_angle`, `applying`. Unlike `calculate_transits`/`calculate_synastry`, `orb` and `exact_angle` are numbers, not `.toFixed(2)` strings.
+- `natal_chart`: Complete birth chart data, same shape as `calculate_transits`' `natal_chart`, for diffing
+- `ephemeris_version`: `<package name>@<version>[+<git short sha>]` of the server that produced the result
 
 ### Angle Aspects
 

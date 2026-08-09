@@ -29,6 +29,23 @@ export const DAY_CHART = {
     plutoSquareLilithPasses: 5,
     plutoConjunctVenusPasses: 3,
     neptuneStationDirect2026: '2026-12-12T22:17:19Z',
+    // SUP-356 calculate_secondary_progressions - elapsed 32.500 tropical yr (year_length_days
+    // 365.2422) -> progressed_datetime 1990-02-03T00:00:00Z. Verified against vendored swetest;
+    // see docs/tool_requests/2026-07-27_secondary-progressions.md for the algorithm.
+    progressions: {
+      elapsedYears: 32.5,
+      progressedDatetime: '1990-02-03T00:00:00Z',
+      solarArcMcLongitude: 313.0775174, // 13°04'39" Aquarius
+      naibodMcLongitude: 312.0339368, // 12°01'57" Aquarius
+      ascendantLongitude: 78.6844134, // 18°41'04" Gemini - derived at natal latitude 51.4769
+      progressedSunLongitude: 313.8913796, // 13°53'29" Aquarius
+      progressedMoonLongitude: 46.8892126, // 16°53'21" Taurus
+      progressedVenusLongitude: 291.5169009, // 21°31'01" Capricorn, retrograde
+      // The raw (wrong) angle this tool exists to replace: chart_points.Midheaven of a plain
+      // calculate_planetary_positions call at progressedDatetime, natal coordinates - 10°27'45"
+      // Leo, +210° from natal MC. Regression guard for SUP-356 acceptance criterion #8.
+      rawMidheavenLongitude: 130.4625838,
+    },
   },
 };
 
@@ -57,6 +74,15 @@ export const PARTNER_CHART = {
     sunHouse: 7,
     partOfFortune: 342.9174, // 12°55′ Pisces
     moonPhase: { phase: 'Crescent', elongation: 67.6455373, illuminatedFraction: 0.311278704 },
+    // SUP-356 calculate_secondary_progressions - elapsed 27.500 tropical yr -> progressed_datetime
+    // 1995-07-31T12:00:00Z. Nonzero natal longitude (-74.0060) exercises the natal-longitude
+    // correction to the fictitious-ARMC-longitude formula (see lib/progressions.js
+    // computeFictitiousLongitude) - DAY_CHART's Greenwich fixture can't catch that on its own.
+    progressions: {
+      elapsedYears: 27.5,
+      progressedDatetime: '1995-07-31T12:00:00Z',
+      solarArcMcLongitude: 235.8452704, // 25°50'43" Scorpio
+    },
   },
 };
 
