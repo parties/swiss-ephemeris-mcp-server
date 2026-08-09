@@ -11,6 +11,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import {
@@ -34,6 +35,14 @@ import {
   invalidOrbOverrideKeys,
   ORB_MODELS,
 } from './lib/aspects.js';
+import {
+  TROPICAL_YEAR_DAYS,
+  computeElapsedYears,
+  computeProgressedDate,
+  formatProgressedDatetime,
+  computeArcDegrees,
+  computeFictitiousLongitude,
+} from './lib/progressions.js';
 
 function validateOrbModel(orbModel) {
   if (orbModel !== undefined && !ORB_MODELS.includes(orbModel)) {
@@ -70,6 +79,26 @@ const SYNASTRY_OVERLAY_BODIES = [...SYNASTRY_BODIES, ...ASPECTABLE_ANGLES];
 // installs, where /app doesn't exist). SE_EPHE_PATH still overrides it.
 const DEFAULT_EPHE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'swisseph');
 
+const PACKAGE_ROOT = path.dirname(fileURLToPath(import.meta.url));
+const PACKAGE_JSON = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8'));
+
+// `<name>@<version>+<short sha>` per docs/tool_requests/2026-07-27_secondary-progressions.md's
+// own provenance line - the sha is best-effort (an npm/npx install has no .git dir) and
+// omitted rather than faked when unavailable. Computed once per process, not per request:
+// neither the package version nor the checked-out commit changes while the server is running.
+let cachedEphemerisVersion;
+function getEphemerisVersion() {
+  if (cachedEphemerisVersion) return cachedEphemerisVersion;
+  let sha = '';
+  try {
+    sha = execSync('git rev-parse --short HEAD', { encoding: 'utf8', cwd: PACKAGE_ROOT, stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  } catch {
+    // Not a git checkout - version string omits the build hash.
+  }
+  cachedEphemerisVersion = sha ? `${PACKAGE_JSON.name}@${PACKAGE_JSON.version}+${sha}` : `${PACKAGE_JSON.name}@${PACKAGE_JSON.version}`;
+  return cachedEphemerisVersion;
+}
+
 // swetest house system codes: https://www.astro.com/swisseph/swephprg.htm#_Toc112948996
 const HOUSE_SYSTEMS = {
   P: 'Placidus',
@@ -91,6 +120,30 @@ function validateHouseSystem(value, paramName = 'house_system') {
       ErrorCode.InvalidParams,
       `${paramName} must be one of: ${Object.keys(HOUSE_SYSTEMS).join(', ')}`
     );
+  }
+  return value;
+}
+
+// SUP-356: only solar_arc and naibod - "ephemeris_time" (the raw clock-time angles) is
+// deliberately not offered, since naming it invites the exact bug this tool exists to fix
+// (see docs/tool_requests/2026-07-27_secondary-progressions.md §4). Unknown values error
+// rather than silently defaulting (acceptance criterion #6).
+const ANGLE_METHODS = ['solar_arc', 'naibod'];
+
+function validateAngleMethod(value) {
+  if (value === undefined) return 'solar_arc';
+  if (typeof value !== 'string' || !ANGLE_METHODS.includes(value)) {
+    throw new McpError(ErrorCode.InvalidParams, `angle_method must be one of: ${ANGLE_METHODS.join(', ')}`);
+  }
+  return value;
+}
+
+const HOUSE_FRAMES = ['progressed', 'natal'];
+
+function validateHouseFrame(value) {
+  if (value === undefined) return 'progressed';
+  if (typeof value !== 'string' || !HOUSE_FRAMES.includes(value)) {
+    throw new McpError(ErrorCode.InvalidParams, `house_frame must be one of: ${HOUSE_FRAMES.join(', ')}`);
   }
   return value;
 }
@@ -386,6 +439,64 @@ class SwissEphemerisServer {
                 },
               },
               required: ['datetime', 'latitude', 'longitude'],
+            },
+          },
+          {
+            name: 'calculate_secondary_progressions',
+            description: 'Calculate secondary progressions (the "day for a year" technique) for a birth chart, progressed to a target date: progressed planetary positions, progressed Ascendant/Midheaven/IC/Descendant, progressed houses, and aspects from the progressed bodies to the natal chart. Progressed angles are derived by directing the natal Midheaven along the ecliptic by the chosen arc and converting to a right ascension (ARMC) before deriving houses - NOT by reading the angles of the raw clock moment `progressed_datetime` falls on, which are off by hundreds of degrees and mean nothing (see `natal_chart` for the birth chart, returned alongside for diffing).',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                birth_datetime: {
+                  type: 'string',
+                  description: 'Birth datetime in ISO8601 format, e.g., 1985-04-12T23:20:50Z',
+                },
+                birth_latitude: {
+                  type: 'number',
+                  description: 'Birth latitude in decimal degrees',
+                },
+                birth_longitude: {
+                  type: 'number',
+                  description: 'Birth longitude in decimal degrees, positive east',
+                },
+                target_date: {
+                  type: 'string',
+                  description: 'ISO8601 datetime to progress to. The real elapsed time between birth_datetime and this date, expressed in tropical years (year_length_days), is converted 1 year = 1 day and added to birth_datetime to get the progressed instant, returned as `progressed_datetime`.',
+                },
+                house_system: {
+                  type: 'string',
+                  description: 'House system code, applied to both the natal chart and the progressed houses: P=Placidus (default), K=Koch, O=Porphyry, R=Regiomontanus, C=Campanus, E=Equal, W=Whole Sign, B=Alcabitus, M=Morinus, T=Topocentric.',
+                },
+                angle_method: {
+                  type: 'string',
+                  enum: ['solar_arc', 'naibod'],
+                  description: 'Convention for the arc the natal Midheaven is directed by. "solar_arc" (default) uses (progressed Sun longitude - natal Sun longitude), which self-corrects for the Sun\'s actual non-mean motion. "naibod" uses a mean rate of 360/year_length_days degrees per elapsed year instead. Both direct the ecliptic Midheaven, not the ARMC/right ascension directly - the two conventions diverge by roughly a degree per few decades of age, which is why the method used is echoed back as `angle_method_used`. An unrecognized value errors rather than silently defaulting.',
+                },
+                house_frame: {
+                  type: 'string',
+                  enum: ['progressed', 'natal'],
+                  description: 'Which house cusps to report as `progressed_houses` and use for house placement of progressed bodies: "progressed" (default) uses the arc-directed progressed cusps computed by this tool; "natal" reuses the birth chart\'s own house cusps. Echoed back as `house_frame_used`. Progressed Ascendant/Midheaven/IC/Descendant (`progressed_angles`) are always the arc-directed progressed values regardless of this setting.',
+                },
+                bodies: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Override the default body list (defaults to the same list as calculate_transits: Sun..Pluto, North Node, Lilith, Chiron, Ceres, Pallas, Juno, Vesta). Applies to `progressed_planets` and the progressed side of `aspects_to_natal`.',
+                },
+                include_minor: {
+                  type: 'boolean',
+                  description: 'Include minor aspects (semisextile, semisquare, sesquiquadrate, quincunx, quintile, biquintile) in aspects_to_natal. Default false.',
+                },
+                include_angles: {
+                  type: 'boolean',
+                  description: 'Include progressed Ascendant and Midheaven as aspectable bodies on the progressed side of aspects_to_natal, and natal Ascendant/Midheaven/Part of Fortune on the natal side. Default true, unlike calculate_transits/calculate_synastry - progressed angle contacts are this tool\'s headline output, so unlike a transiting Ascendant (which sweeps the whole zodiac daily and means nothing), the progressed Ascendant/Midheaven stay aspectable here. Progressed Part of Fortune is never included on the progressed side regardless of this flag - which day/night formula applies to a progressed sect is unsettled.',
+                },
+                orb_overrides: {
+                  type: 'object',
+                  description: 'Per-aspect orb overrides in degrees for aspects_to_natal, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"angle": {"square": 4}} or {"derived": {"square": 2}}. The default orb tables (see calculate_transits\' orb_model description) are transit-scaled; the conventional orb for progressed aspects is tighter, around 1 degree, so callers doing serious progressions work will usually want to tighten these rather than use the defaults as-is.',
+                  additionalProperties: { type: ['number', 'object'] },
+                },
+              },
+              required: ['birth_datetime', 'birth_latitude', 'birth_longitude', 'target_date'],
             },
           },
         ],
@@ -978,6 +1089,172 @@ class SwissEphemerisServer {
     }));
   }
 
+  // SUP-356: secondary progressions. See docs/tool_requests/2026-07-27_secondary-progressions.md
+  // for the algorithm and lib/progressions.js for the pure angle math this orchestrates.
+  //
+  // Three swetest-backed ephemeris calls, all via the existing calculateEphemeris:
+  //   1. natalChart      - the birth chart (also the source of natal Sun/MC for the arc).
+  //   2. progressedRaw    - calculateEphemeris at progressed_datetime, but still at the
+  //      NATAL coordinates. Its chart_points.Midheaven/Ascendant are the "raw" angles this
+  //      tool exists to replace (spec §2) and are never surfaced, but its `planets` are the
+  //      real progressed planetary positions (geocentric longitude doesn't depend on
+  //      observer location), and its chart_points.ARMC is `base_ARMC` - the reference point
+  //      the fictitious-longitude trick solves relative to.
+  //   3. progressedFrame - calculateEphemeris at progressed_datetime again, this time with
+  //      the fictitious longitude in place of birth_longitude. Its houses/chart_points are
+  //      the real progressed angles/houses - see computeFictitiousLongitude for why this
+  //      works (swetest's house routine only ever consumes ARMC/latitude/obliquity/system).
+  calculateSecondaryProgressions(args) {
+    const {
+      birth_datetime,
+      birth_latitude,
+      birth_longitude,
+      target_date,
+      house_system,
+      angle_method,
+      house_frame,
+      bodies,
+      include_minor,
+      include_angles,
+      orb_overrides,
+    } = args;
+
+    if (!birth_datetime || typeof birth_datetime !== 'string') {
+      throw new McpError(ErrorCode.InvalidParams, 'birth_datetime parameter is required and must be a string');
+    }
+    if (typeof birth_latitude !== 'number' || birth_latitude < -90 || birth_latitude > 90) {
+      throw new McpError(ErrorCode.InvalidParams, 'birth_latitude must be a number between -90 and 90');
+    }
+    if (typeof birth_longitude !== 'number' || birth_longitude < -180 || birth_longitude > 180) {
+      throw new McpError(ErrorCode.InvalidParams, 'birth_longitude must be a number between -180 and 180');
+    }
+    if (!target_date || typeof target_date !== 'string') {
+      throw new McpError(ErrorCode.InvalidParams, 'target_date parameter is required and must be a string');
+    }
+
+    const birthDate = new Date(birth_datetime);
+    if (isNaN(birthDate.getTime())) {
+      throw new McpError(ErrorCode.InvalidParams, 'birth_datetime must be a valid ISO8601 datetime');
+    }
+    const targetDate = new Date(target_date);
+    if (isNaN(targetDate.getTime())) {
+      throw new McpError(ErrorCode.InvalidParams, 'target_date must be a valid ISO8601 datetime');
+    }
+
+    if (include_minor !== undefined && typeof include_minor !== 'boolean') {
+      throw new McpError(ErrorCode.InvalidParams, 'include_minor must be a boolean');
+    }
+    if (include_angles !== undefined && typeof include_angles !== 'boolean') {
+      throw new McpError(ErrorCode.InvalidParams, 'include_angles must be a boolean');
+    }
+    if (bodies !== undefined && (!Array.isArray(bodies) || !bodies.every((b) => typeof b === 'string'))) {
+      throw new McpError(ErrorCode.InvalidParams, 'bodies must be an array of strings');
+    }
+    if (orb_overrides !== undefined && (typeof orb_overrides !== 'object' || orb_overrides === null || Array.isArray(orb_overrides))) {
+      throw new McpError(ErrorCode.InvalidParams, 'orb_overrides must be an object');
+    }
+
+    const validatedHouseSystem = validateHouseSystem(house_system);
+    const validatedAngleMethod = validateAngleMethod(angle_method);
+    const validatedHouseFrame = validateHouseFrame(house_frame);
+    const includeMinor = include_minor ?? false;
+    const includeAngles = include_angles ?? true;
+    const requestedBodies = this.resolveSynastryBodies(bodies);
+
+    const natalChart = this.calculateEphemeris(birth_datetime, birth_latitude, birth_longitude, validatedHouseSystem);
+
+    const elapsedYears = computeElapsedYears(birthDate, targetDate);
+    const progressedDate = computeProgressedDate(birthDate, elapsedYears);
+    const progressedDatetime = formatProgressedDatetime(progressedDate);
+
+    const progressedRaw = this.calculateEphemeris(progressedDatetime, birth_latitude, birth_longitude, validatedHouseSystem);
+
+    const arcDegrees = computeArcDegrees(validatedAngleMethod, {
+      natalSunLongitude: natalChart.planets.Sun.longitude,
+      progressedSunLongitude: progressedRaw.planets.Sun.longitude,
+      elapsedYears,
+    });
+    const progressedMcLongitude = (natalChart.chart_points.Midheaven.longitude + arcDegrees) % 360;
+    const fictitiousLongitude = computeFictitiousLongitude({
+      progressedMcLongitude,
+      obliquityDeg: progressedRaw.obliquity,
+      baseArmc: progressedRaw.chart_points.ARMC.longitude,
+      natalLongitude: birth_longitude,
+    });
+
+    const progressedFrame = this.calculateEphemeris(progressedDatetime, birth_latitude, fictitiousLongitude, validatedHouseSystem);
+
+    const progressedPlanets = {};
+    for (const name of requestedBodies) {
+      const planet = progressedRaw.planets[name];
+      if (!planet) continue;
+      progressedPlanets[name] = {
+        longitude: planet.longitude,
+        sign: planet.sign,
+        degree: planet.degree,
+        speed: planet.speed,
+        retrograde: (planet.speed ?? 0) < 0,
+      };
+    }
+
+    const progressedHouses = validatedHouseFrame === 'natal' ? natalChart.houses : progressedFrame.houses;
+    const progressedAngles = {
+      Ascendant: toPointPosition(progressedFrame, 'Ascendant'),
+      Midheaven: toPointPosition(progressedFrame, 'Midheaven'),
+      IC: toPointPosition(progressedFrame, 'IC'),
+      Descendant: toPointPosition(progressedFrame, 'Descendant'),
+    };
+
+    // Natal side reuses the shared gate (natal Ascendant/Midheaven/Part of Fortune when
+    // includeAngles) - same as calculate_transits. Progressed side is built by hand below:
+    // unlike calculateTransitAspects, progressed Ascendant/Midheaven must stay aspectable
+    // (SUP-356 advisory comment #2) - and progressed Part of Fortune is deliberately never
+    // included, sect convention for a progressed chart being unsettled.
+    const { bodiesWithLonSpeed: natalBodies } = this.resolveAspectBodies(natalChart, {
+      includeAngles,
+      bodies: requestedBodies,
+      orbOverrides: orb_overrides,
+    });
+    const frozenNatalBodies = natalBodies.map((b) => ({ ...b, speed: b.speed == null ? null : 0 }));
+
+    const progressedPlanetBodies = requestedBodies
+      .filter((name) => progressedRaw.planets[name])
+      .map((name) => ({ name, longitude: progressedRaw.planets[name].longitude, speed: progressedRaw.planets[name].speed ?? null }));
+    const progressedAngleBodies = includeAngles
+      ? ['Ascendant', 'Midheaven']
+        .filter((name) => progressedFrame.chart_points[name])
+        .map((name) => ({ name, longitude: progressedFrame.chart_points[name].longitude, speed: null }))
+      : [];
+    const progressedBodies = [...progressedPlanetBodies, ...progressedAngleBodies];
+
+    const aspectsToNatal = calculateCrossChartAspects(progressedBodies, frozenNatalBodies, {
+      includeMinor,
+      orbOverrides: orb_overrides,
+    }).map((a) => ({
+      progressed_body: a.body_a,
+      natal_body: a.body_b,
+      aspect: a.aspect,
+      category: a.category,
+      orb: Math.round(a.orb * 100) / 100,
+      exact_angle: Math.round(a.separation * 100) / 100,
+      applying: a.applying,
+    }));
+
+    return {
+      progressed_datetime: progressedDatetime,
+      elapsed_years: elapsedYears,
+      year_length_days: TROPICAL_YEAR_DAYS,
+      progressed_planets: progressedPlanets,
+      progressed_houses: progressedHouses,
+      progressed_angles: progressedAngles,
+      angle_method_used: validatedAngleMethod,
+      house_frame_used: validatedHouseFrame,
+      aspects_to_natal: aspectsToNatal,
+      natal_chart: natalChart,
+      ephemeris_version: getEphemerisVersion(),
+    };
+  }
+
   async handleToolCall(name, args) {
     switch (name) {
       case 'calculate_planetary_positions':
@@ -1373,6 +1650,9 @@ class SwissEphemerisServer {
           aspects: chartAspects,
           settings_used,
         };
+
+      case 'calculate_secondary_progressions':
+        return this.calculateSecondaryProgressions(args);
 
       default:
         throw new McpError(
