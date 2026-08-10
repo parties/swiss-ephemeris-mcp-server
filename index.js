@@ -1508,7 +1508,7 @@ class SwissEphemerisServer {
     const validatedHouseSystem = validateHouseSystem(house_system);
     const validatedEventTypes = validateEventTypes(event_types);
 
-    const requestedTransitingBodies = Array.isArray(bodies) && bodies.length ? bodies : DEFAULT_TRANSITING_BODIES;
+    const requestedTransitingBodies = Array.isArray(bodies) && bodies.length ? [...new Set(bodies)] : DEFAULT_TRANSITING_BODIES;
     for (const b of requestedTransitingBodies) {
       if (!EVENT_TRANSITING_BODIES.has(b)) {
         throw new McpError(ErrorCode.InvalidParams, `Unknown transiting body: ${b}`);

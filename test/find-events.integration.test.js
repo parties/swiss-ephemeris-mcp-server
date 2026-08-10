@@ -41,6 +41,18 @@ test('find_events rejects an unknown transiting body', { skip: !HAS_SWETEST }, a
   );
 });
 
+test('find_events dedupes duplicate bodies entries', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const window = { window_start: '2026-01-01T00:00:00Z', window_end: '2027-01-01T00:00:00Z' };
+  const [single, duplicated] = await Promise.all([
+    server.handleToolCall('find_events', { ...DAY_INPUT, ...window, bodies: ['Mars'], event_types: ['sign_ingress'] }),
+    server.handleToolCall('find_events', { ...DAY_INPUT, ...window, bodies: ['Mars', 'Mars'], event_types: ['sign_ingress'] }),
+  ]);
+  assert.ok(single.events.length > 0, 'expected at least one Mars sign_ingress in the window');
+  assert.deepEqual(duplicated.events, single.events);
+  assert.deepEqual(duplicated.settings_used.bodies, ['Mars']);
+});
+
 test('find_events rejects a malformed orb_overrides value', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
   await assert.rejects(
