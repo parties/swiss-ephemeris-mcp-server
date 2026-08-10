@@ -26,13 +26,17 @@ import {
   DEFAULT_ASPECT_BODIES,
   ANGLE_BODIES,
   ASPECTABLE_ANGLES,
+  MAJOR_ASPECTS,
   calculateNatalAspects,
   calculateCrossChartAspects,
   calculateHouseOverlay,
   toAspectBody,
   toPointPosition,
   resolveChartPoint,
+  findHouseForLongitude,
   invalidOrbOverrideKeys,
+  resolveAspectSettings,
+  orbAllowedFor,
   ORB_MODELS,
 } from './lib/aspects.js';
 import {
@@ -43,6 +47,17 @@ import {
   computeArcDegrees,
   computeFictitiousLongitude,
 } from './lib/progressions.js';
+import { jdFromDate, seriesFor as ephemerisSeriesFor, positionAt as ephemerisPositionAt, eclipsesFor } from './lib/ephemeris-series.js';
+import {
+  scanTransitingBody,
+  findContacts,
+  findStations,
+  findCrossings,
+  findLunations,
+  annotateEclipses,
+  natalContactsFor,
+  wrap180,
+} from './lib/event-search.js';
 
 function validateOrbModel(orbModel) {
   if (orbModel !== undefined && !ORB_MODELS.includes(orbModel)) {
@@ -146,6 +161,83 @@ function validateHouseFrame(value) {
     throw new McpError(ErrorCode.InvalidParams, `house_frame must be one of: ${HOUSE_FRAMES.join(', ')}`);
   }
   return value;
+}
+
+// find_events (SUP-349/SUP-351) --------------------------------------------------------
+
+// Valid transiting-side bodies: exactly DEFAULT_ASPECT_BODIES (17) - the set
+// lib/ephemeris-series.js's BODY_CODES can look up a position/speed for. Angle bodies
+// and Vertex can never transit (spec Q9): they're artifacts of the moment's location and
+// time of day, not moving points, so they're excluded from validity entirely rather than
+// gated behind a flag the way they are on the natal side.
+const EVENT_TRANSITING_BODIES = new Set(DEFAULT_ASPECT_BODIES);
+
+// Default transiting set (spec Q9): the bodies slow enough to define forecasting
+// "chapters" rather than trigger them. The Moon is 21.7x the rest of the output alone
+// (spec §4.3) and is excluded from the default along with Sun/Mercury/Venus/asteroids/
+// Lilith/North Node - all still reachable via an explicit `bodies` request.
+const DEFAULT_TRANSITING_BODIES = ['Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto', 'Chiron'];
+
+// Bodies that can station (spec Q5), 13 total. Sun/Moon never station (zero measured
+// speed-sign changes) and mean Apogee (Lilith) is always direct by construction, so no
+// explicit filtering is needed for them - scanTransitingBody just never finds a sign
+// change. The true Node is different: it reverses ~350 times/year from orbital wobble
+// (spec §1.7), which is jitter, not stations, so it's unconditionally excluded here even
+// when North Node is explicitly requested via `bodies`.
+const STATION_CAPABLE_BODIES = new Set([
+  'Mercury', 'Venus', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto',
+  'Chiron', 'Ceres', 'Pallas', 'Juno', 'Vesta',
+]);
+
+const EVENT_TYPES = ['aspect', 'station', 'sign_ingress', 'house_ingress', 'lunation'];
+
+// Natal targets whose contact dates carry birth-time error, not just an aspect orb (spec
+// Q2/§6.3): the Ascendant moves ~1deg/4min of clock time, so a 10-minute birth-time
+// uncertainty is ~2.5deg of Ascendant - which at an outer planet's speed can be on the
+// order of months of date uncertainty. Part of Fortune inherits this because it's
+// derived from the Ascendant.
+const BIRTH_TIME_SENSITIVE_TARGETS = new Set(['Ascendant', 'Midheaven', 'Part of Fortune', 'Vertex']);
+
+const EVENT_SIGNS = [
+  'Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo',
+  'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces',
+];
+
+// A crossing's solved longitude sits within a fraction of an arcsecond of the exact
+// target it was solved for (bisection converges on time, not longitude, but even the
+// fastest body - the Moon - moves only ~1e-6 deg over the remaining time tolerance). That
+// residual can fall on either side of a sign/house boundary, so which side floating point
+// happens to land on is not reliable for labelling. Nudging by a fixed, much larger
+// epsilon in the direction of travel (or against it) resolves the sign/house unambiguously
+// instead - still negligible next to any real sign (30deg) or house width.
+const INGRESS_EPSILON_DEG = 1e-4;
+
+function signIndexForLongitude(longitude) {
+  return Math.floor((((longitude % 360) + 360) % 360) / 30);
+}
+
+// Max window (spec Q9): 10 years, chosen because it's still cheap (3653 daily rows per
+// body, one swetest spawn each). A longer request is clamped rather than rejected, and
+// the clamp is surfaced via `window.truncated` - "no silent truncation" means the caller
+// can tell, not that the window can never be shortened.
+const MAX_EVENT_WINDOW_DAYS = 3653;
+
+function validateEventTypes(value) {
+  if (value === undefined) return EVENT_TYPES;
+  if (!Array.isArray(value) || value.length === 0 || !value.every((t) => EVENT_TYPES.includes(t))) {
+    throw new McpError(ErrorCode.InvalidParams, `event_types must be a non-empty array from: ${EVENT_TYPES.join(', ')}`);
+  }
+  return value;
+}
+
+// Position provider (spec Q10) over lib/ephemeris-series.js's swetest-backed functions -
+// the only transiting-side provider this ticket ships; progressions/solar-arc providers
+// are a future drop-in against the same lib/event-search.js engine.
+function transitProviderFor(body) {
+  return {
+    seriesFor: (startJd, endJd, stepDays) => ephemerisSeriesFor(body, startJd, endJd, stepDays),
+    positionAt: (atJd) => ephemerisPositionAt(body, atJd),
+  };
 }
 
 class SwissEphemerisServer {
@@ -497,6 +589,85 @@ class SwissEphemerisServer {
                 },
               },
               required: ['birth_datetime', 'birth_latitude', 'birth_longitude', 'target_date'],
+            },
+          },
+          {
+            name: 'find_events',
+            description: 'Search a UTC window for time-domain astrological events: transiting-to-natal aspect contacts (`contacts[]`, grouped into orb episodes with every exact pass), and instants (`events[]`) - planetary stations, sign/house ingresses (against the NATAL chart\'s houses, never the transiting moment\'s own), and lunations (New/Full Moon, optionally quarters) with eclipse annotation. Correctness comes from segmenting the window at the transiting body\'s own stations and enumerating every target crossing in each monotone segment, not from a scan step - no pass can be skipped between samples.',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                birth_datetime: {
+                  type: 'string',
+                  description: 'Birth datetime in ISO8601 format, e.g., 1985-04-12T23:20:50Z',
+                },
+                latitude: {
+                  type: 'number',
+                  description: 'Birth latitude in decimal degrees',
+                },
+                longitude: {
+                  type: 'number',
+                  description: 'Birth longitude in decimal degrees, positive east',
+                },
+                window_start: {
+                  type: 'string',
+                  description: 'Start of the UTC search window, ISO8601, e.g., 2026-01-01T00:00:00Z',
+                },
+                window_end: {
+                  type: 'string',
+                  description: 'End of the UTC search window, ISO8601. Must be after window_start. A window longer than 10 years is clamped to 10 years from window_start rather than rejected - see `window.truncated` on the result.',
+                },
+                event_types: {
+                  type: 'array',
+                  items: { type: 'string', enum: ['aspect', 'station', 'sign_ingress', 'house_ingress', 'lunation'] },
+                  description: 'Which event categories to search. Default: all five. "aspect" populates `contacts[]`; the other four populate `events[]`.',
+                },
+                house_system: {
+                  type: 'string',
+                  description: 'House system code applied to the natal chart and to house_ingress. Default P=Placidus, K=Koch, O=Porphyry, R=Regiomontanus, C=Campanus, E=Equal, W=Whole Sign, B=Alcabitus, M=Morinus, T=Topocentric.',
+                },
+                bodies: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'TRANSITING side. Default: Mars, Jupiter, Saturn, Uranus, Neptune, Pluto, Chiron - the bodies slow enough to define forecasting "chapters" rather than trigger them. The transiting Moon is excluded from the default (it alone is 21.7x the rest of the output) but reachable by explicit request, as are Sun/Mercury/Venus/asteroids/Lilith/North Node. Angle bodies and Vertex can never transit - they sweep the whole zodiac daily and are excluded unconditionally. Governs `contacts[]`, `station` events (further limited to the 13 bodies that can station; Sun/Moon/Lilith/North Node never emit one even if listed here), and `sign_ingress`/`house_ingress` events.',
+                },
+                targets: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'NATAL side. Default: the same 17-body list as calculate_transits (Sun..Pluto, North Node, Lilith, Chiron, Ceres, Pallas, Juno, Vesta). Ascendant/Midheaven/Part of Fortune behind include_angles, Vertex behind include_vertex, South Node behind include_south_node - same gating as calculate_transits/calculate_aspects. Every contact whose natal_point is Ascendant, Midheaven, Part of Fortune or Vertex carries `birth_time_sensitive: true`.',
+                },
+                include_minor: {
+                  type: 'boolean',
+                  description: 'Include minor aspects (semisextile, semisquare, sesquiquadrate, quincunx, quintile, biquintile) in contacts[]. Default false - matches calculate_aspects/calculate_transits exactly, so an aspect visible in a snapshot tool is never unsearchable here.',
+                },
+                include_angles: {
+                  type: 'boolean',
+                  description: 'Include natal Ascendant, Midheaven and Part of Fortune as targets. Default false.',
+                },
+                include_south_node: {
+                  type: 'boolean',
+                  description: 'Include natal South Node as a target. Default false.',
+                },
+                include_vertex: {
+                  type: 'boolean',
+                  description: 'Include natal Vertex as a target. Default false, independent of include_angles.',
+                },
+                include_quarter_moons: {
+                  type: 'boolean',
+                  description: 'Include First/Last Quarter alongside New/Full Moon in lunation events. Default false - New and Full carry the overwhelming majority of the reading, and the default aims for ~25 lunations/year rather than ~50.',
+                },
+                orb_overrides: {
+                  type: 'object',
+                  description: 'Per-aspect orb overrides in degrees for contacts[], e.g. {"conjunction": 10}. Also accepts the per-class shape ({"angle": {"square": 4}}, {"derived": {"square": 2}}) under orb_model "class", or the {"moieties": {...}, "multipliers": {...}} shape under "moiety" - same as calculate_transits.',
+                  additionalProperties: { type: ['number', 'object'] },
+                },
+                orb_model: {
+                  type: 'string',
+                  enum: ['class', 'moiety'],
+                  description: 'Orb resolution model for contacts[]. "moiety" (default) sums each body\'s half-orb and scales by the aspect\'s multiplier; "class" uses the fixed per-class tables. Both are echoed in settings_used, and the choice can move a contact\'s orb episode boundaries by months for the same pair - see calculate_transits\' orb_model description for the formula.',
+                },
+              },
+              required: ['birth_datetime', 'latitude', 'longitude', 'window_start', 'window_end'],
             },
           },
         ],
@@ -1255,6 +1426,295 @@ class SwissEphemerisServer {
     };
   }
 
+  // find_events (SUP-349 §3/§5 steps 5-6): the MCP surface over lib/event-search.js's
+  // engine (SUP-350). Adds no search logic of its own - every date comes from
+  // scanTransitingBody/findContacts/findStations/findCrossings/findLunations, called once
+  // per transiting body (the coarse scan and its stations/segments are reused across that
+  // body's contacts, stations, and ingresses) and once overall for lunations.
+  findEvents(args) {
+    const {
+      birth_datetime,
+      latitude,
+      longitude,
+      window_start,
+      window_end,
+      event_types,
+      house_system,
+      bodies,
+      targets,
+      include_minor,
+      include_angles,
+      include_south_node,
+      include_vertex,
+      include_quarter_moons,
+      orb_overrides,
+      orb_model,
+    } = args;
+
+    if (!birth_datetime || typeof birth_datetime !== 'string') {
+      throw new McpError(ErrorCode.InvalidParams, 'birth_datetime parameter is required and must be a string');
+    }
+    if (typeof latitude !== 'number' || latitude < -90 || latitude > 90) {
+      throw new McpError(ErrorCode.InvalidParams, 'latitude must be a number between -90 and 90');
+    }
+    if (typeof longitude !== 'number' || longitude < -180 || longitude > 180) {
+      throw new McpError(ErrorCode.InvalidParams, 'longitude must be a number between -180 and 180');
+    }
+    if (!window_start || typeof window_start !== 'string') {
+      throw new McpError(ErrorCode.InvalidParams, 'window_start parameter is required and must be a string');
+    }
+    if (!window_end || typeof window_end !== 'string') {
+      throw new McpError(ErrorCode.InvalidParams, 'window_end parameter is required and must be a string');
+    }
+
+    const windowStartDate = new Date(window_start);
+    if (isNaN(windowStartDate.getTime())) {
+      throw new McpError(ErrorCode.InvalidParams, 'window_start must be a valid ISO8601 datetime');
+    }
+    const windowEndDate = new Date(window_end);
+    if (isNaN(windowEndDate.getTime())) {
+      throw new McpError(ErrorCode.InvalidParams, 'window_end must be a valid ISO8601 datetime');
+    }
+    if (windowEndDate <= windowStartDate) {
+      throw new McpError(ErrorCode.InvalidParams, 'window_end must be after window_start');
+    }
+
+    if (include_minor !== undefined && typeof include_minor !== 'boolean') {
+      throw new McpError(ErrorCode.InvalidParams, 'include_minor must be a boolean');
+    }
+    if (include_angles !== undefined && typeof include_angles !== 'boolean') {
+      throw new McpError(ErrorCode.InvalidParams, 'include_angles must be a boolean');
+    }
+    if (include_south_node !== undefined && typeof include_south_node !== 'boolean') {
+      throw new McpError(ErrorCode.InvalidParams, 'include_south_node must be a boolean');
+    }
+    if (include_vertex !== undefined && typeof include_vertex !== 'boolean') {
+      throw new McpError(ErrorCode.InvalidParams, 'include_vertex must be a boolean');
+    }
+    if (include_quarter_moons !== undefined && typeof include_quarter_moons !== 'boolean') {
+      throw new McpError(ErrorCode.InvalidParams, 'include_quarter_moons must be a boolean');
+    }
+    if (bodies !== undefined && (!Array.isArray(bodies) || !bodies.every((b) => typeof b === 'string'))) {
+      throw new McpError(ErrorCode.InvalidParams, 'bodies must be an array of strings');
+    }
+    if (targets !== undefined && (!Array.isArray(targets) || !targets.every((t) => typeof t === 'string'))) {
+      throw new McpError(ErrorCode.InvalidParams, 'targets must be an array of strings');
+    }
+    if (orb_overrides !== undefined && (typeof orb_overrides !== 'object' || orb_overrides === null || Array.isArray(orb_overrides))) {
+      throw new McpError(ErrorCode.InvalidParams, 'orb_overrides must be an object');
+    }
+    validateOrbModel(orb_model);
+
+    const validatedHouseSystem = validateHouseSystem(house_system);
+    const validatedEventTypes = validateEventTypes(event_types);
+
+    const requestedTransitingBodies = Array.isArray(bodies) && bodies.length ? bodies : DEFAULT_TRANSITING_BODIES;
+    for (const b of requestedTransitingBodies) {
+      if (!EVENT_TRANSITING_BODIES.has(b)) {
+        throw new McpError(ErrorCode.InvalidParams, `Unknown transiting body: ${b}`);
+      }
+    }
+
+    const includeMinor = include_minor ?? false;
+    const includeAngles = include_angles ?? false;
+    const includeSouthNode = include_south_node ?? false;
+    const includeVertex = include_vertex ?? false;
+    const includeQuarterMoons = include_quarter_moons ?? false;
+    const orbOverrides = orb_overrides ?? {};
+    const orbModel = orb_model ?? 'moiety';
+
+    // Window cap (spec Q9) - clamp rather than reject, but say so (window.truncated)
+    // rather than silently searching a shorter span than what was asked for.
+    let effectiveEndDate = windowEndDate;
+    let windowTruncated = false;
+    const requestedWindowDays = (windowEndDate - windowStartDate) / 86400000;
+    if (requestedWindowDays > MAX_EVENT_WINDOW_DAYS) {
+      effectiveEndDate = new Date(windowStartDate.getTime() + MAX_EVENT_WINDOW_DAYS * 86400000);
+      windowTruncated = true;
+    }
+
+    const natalChart = this.calculateEphemeris(birth_datetime, latitude, longitude, validatedHouseSystem);
+    const { bodiesWithLonSpeed: natalTargets, requestedBodies: requestedTargets } = this.resolveAspectBodies(natalChart, {
+      includeAngles,
+      includeSouthNode,
+      includeVertex,
+      bodies: targets,
+      orbOverrides,
+      orbModel,
+    });
+
+    const aspectSettings = resolveAspectSettings({ includeMinor, orbOverrides, orbModel });
+    const aspectDefs = aspectSettings.aspectDefs;
+    const natalOrbAllowedFor = (transitingBody) => (targetName, aspectName) =>
+      orbAllowedFor(aspectSettings, transitingBody, targetName, aspectName);
+
+    const startJd = jdFromDate(windowStartDate);
+    const endJd = jdFromDate(effectiveEndDate);
+
+    // Natal cusps, resolved once - house_ingress targets and the Whole Sign coincidence
+    // flag (spec Q6) both key off these, never off the house_system code directly.
+    const cusps = [];
+    for (let house = 1; house <= 12; house++) {
+      const cuspLongitude = natalChart.houses[house].longitude;
+      const nearestSignBoundary = Math.round(cuspLongitude / 30) * 30;
+      const coincidesWithSignIngress = Math.abs(wrap180(cuspLongitude - nearestSignBoundary)) < 1 / 3600;
+      cusps.push({ house, longitude: cuspLongitude, coincidesWithSignIngress });
+    }
+
+    const contacts = [];
+    const events = [];
+
+    // Lunations are transiting-to-transiting (Sun-Moon) and don't depend on the
+    // per-transiting-body loop below, so their scan is skipped entirely when excluded.
+    const needsBodyScan = validatedEventTypes.some((t) => t !== 'lunation');
+
+    if (needsBodyScan) {
+      for (const body of requestedTransitingBodies) {
+        const provider = transitProviderFor(body);
+        const { segments, stations } = scanTransitingBody(provider, startJd, endJd, 1);
+
+        if (validatedEventTypes.includes('aspect')) {
+          for (const target of natalTargets) {
+            for (const [aspectName, aspectAngle] of Object.entries(aspectDefs)) {
+              const orbAllowed = orbAllowedFor(aspectSettings, body, target.name, aspectName);
+              const category = Object.hasOwn(MAJOR_ASPECTS, aspectName) ? 'major' : 'minor';
+
+              // A square/sextile/trine (and their minor-aspect equivalents) has TWO target
+              // longitudes 180deg apart - natal+angle and natal-angle - that are equally
+              // "square"/"sextile"/"trine"; conjunction (0) and opposition (180) are the
+              // only angles where those coincide. findContacts searches one fixed target
+              // per call, so both must be searched for every other angle or a fast body
+              // (e.g. Mars, which can reach both sides within a single-year window) would
+              // silently lose whichever side isn't natal+angle. `aspect_angle` on the
+              // output always reports the canonical dict value (e.g. 90 for square), never
+              // 270, matching how calculate_aspects/calculate_transits label both sides.
+              const searchAngles = (aspectAngle === 0 || aspectAngle === 180)
+                ? [aspectAngle]
+                : [aspectAngle, 360 - aspectAngle];
+
+              for (const searchAngle of searchAngles) {
+                for (const contact of findContacts({
+                  provider, segments, stations,
+                  natalLongitude: target.longitude, aspectAngle: searchAngle, orbAllowed,
+                  startJd, endJd,
+                })) {
+                  contacts.push({
+                    transiting_body: body,
+                    natal_point: target.name,
+                    aspect: aspectName,
+                    category,
+                    aspect_angle: aspectAngle,
+                    orb_allowed: contact.orb_allowed,
+                    enters_orb: contact.enters_orb,
+                    leaves_orb: contact.leaves_orb,
+                    passes: contact.passes.map(({ jd, ...pass }) => pass),
+                    closest_approach: contact.closest_approach,
+                    birth_time_sensitive: BIRTH_TIME_SENSITIVE_TARGETS.has(target.name),
+                    enters_orb_truncated: contact.enters_orb_truncated,
+                    leaves_orb_truncated: contact.leaves_orb_truncated,
+                  });
+                }
+              }
+            }
+          }
+        }
+
+        if (validatedEventTypes.includes('station') && STATION_CAPABLE_BODIES.has(body)) {
+          for (const { jd, ...station } of findStations(provider, startJd, endJd, 1)) {
+            events.push({
+              ...station,
+              body,
+              natal_contacts: natalContactsFor(station.longitude, natalTargets, aspectDefs, natalOrbAllowedFor(body)),
+            });
+          }
+        }
+
+        if (validatedEventTypes.includes('sign_ingress')) {
+          for (let k = 0; k < 12; k++) {
+            for (const crossing of findCrossings(provider, segments, k * 30)) {
+              const direct = !crossing.retrograde;
+              const nudge = direct ? INGRESS_EPSILON_DEG : -INGRESS_EPSILON_DEG;
+              events.push({
+                type: 'sign_ingress',
+                datetime: crossing.datetime,
+                body,
+                direction: direct ? 'direct' : 'retrograde',
+                from_sign: EVENT_SIGNS[signIndexForLongitude(crossing.longitude - nudge)],
+                to_sign: EVENT_SIGNS[signIndexForLongitude(crossing.longitude + nudge)],
+                longitude: crossing.longitude,
+              });
+            }
+          }
+        }
+
+        if (validatedEventTypes.includes('house_ingress')) {
+          for (const cusp of cusps) {
+            for (const crossing of findCrossings(provider, segments, cusp.longitude)) {
+              const direct = !crossing.retrograde;
+              const nudge = direct ? INGRESS_EPSILON_DEG : -INGRESS_EPSILON_DEG;
+              events.push({
+                type: 'house_ingress',
+                datetime: crossing.datetime,
+                body,
+                direction: direct ? 'direct' : 'retrograde',
+                from_house: findHouseForLongitude(crossing.longitude - nudge, natalChart.houses),
+                to_house: findHouseForLongitude(crossing.longitude + nudge, natalChart.houses),
+                cusp_longitude: cusp.longitude,
+                house_system: validatedHouseSystem,
+                coincides_with_sign_ingress: cusp.coincidesWithSignIngress,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if (validatedEventTypes.includes('lunation')) {
+      const sunProvider = transitProviderFor('Sun');
+      const moonProvider = transitProviderFor('Moon');
+      const solarEclipses = eclipsesFor('solar', startJd, endJd);
+      const lunarEclipses = eclipsesFor('lunar', startJd, endJd);
+      const lunations = annotateEclipses(
+        findLunations({ sunProvider, moonProvider, startJd, endJd, includeQuarterMoons, stepDays: 1 }),
+        { solarEclipses, lunarEclipses }
+      );
+
+      for (const { jd, ...lunation } of lunations) {
+        events.push({
+          ...lunation,
+          natal_contacts: natalContactsFor(lunation.longitude, natalTargets, aspectDefs, natalOrbAllowedFor('Moon')),
+        });
+      }
+    }
+
+    contacts.sort((a, b) => new Date(a.enters_orb) - new Date(b.enters_orb));
+    events.sort((a, b) => new Date(a.datetime) - new Date(b.datetime));
+
+    return {
+      window: {
+        start: window_start,
+        end: windowTruncated ? effectiveEndDate.toISOString().replace(/\.\d{3}Z$/, 'Z') : window_end,
+        truncated: windowTruncated,
+      },
+      contacts,
+      events,
+      settings_used: {
+        event_types: validatedEventTypes,
+        bodies: requestedTransitingBodies,
+        targets: requestedTargets,
+        house_system: validatedHouseSystem,
+        orb_model: orbModel,
+        orb_overrides: orbOverrides,
+        include_minor_aspects: includeMinor,
+        include_angles: includeAngles,
+        include_south_node: includeSouthNode,
+        include_vertex: includeVertex,
+        include_quarter_moons: includeQuarterMoons,
+        node_type: 'true',
+      },
+    };
+  }
+
   async handleToolCall(name, args) {
     switch (name) {
       case 'calculate_planetary_positions':
@@ -1653,6 +2113,9 @@ class SwissEphemerisServer {
 
       case 'calculate_secondary_progressions':
         return this.calculateSecondaryProgressions(args);
+
+      case 'find_events':
+        return this.findEvents(args);
 
       default:
         throw new McpError(
