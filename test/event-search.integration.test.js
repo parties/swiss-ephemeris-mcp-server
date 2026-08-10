@@ -7,6 +7,7 @@ import {
   scanTransitingBody,
   findContacts,
   findStations,
+  findCrossings,
   findLunations,
   annotateEclipses,
   natalContactsFor,
@@ -490,4 +491,25 @@ test('§4.7 penumbral lunar eclipse is annotated, not filtered', { skip: !HAS_SW
   const penumbral = annotated.find((l) => l.eclipse?.eclipse_type?.includes('penumb') && Math.abs(l.eclipse.magnitudes[1] - 0.0018) < 1e-4);
   assert.ok(penumbral, 'expected the faint 2027-07-18 penumbral lunar eclipse to be emitted');
   assert.deepEqual(penumbral.eclipse.magnitudes, [0, 0.0018]);
+});
+
+// findCrossings (SUP-351): the ingress primitive - every crossing of a fixed longitude,
+// no orb envelope. Spec §1.8/§4.6 - Pluto crossed 0deg Aquarius five times, retrograde
+// re-ingress included, over this window. Verified independently at engine level so a
+// find_events-tool-level regression and an engine-level regression can't both hide behind
+// the same bug.
+test('findCrossings: Pluto crosses 300° five times 2023-2025 (retrograde re-ingress)', { skip: !HAS_SWETEST }, () => {
+  const start = jd('2023-01-01T00:00:00Z');
+  const end = jd('2025-06-01T00:00:00Z');
+  const provider = providerFor('Pluto');
+  const { segments } = scanTransitingBody(provider, start, end, 1);
+
+  const crossings = findCrossings(provider, segments, 300);
+  assert.equal(crossings.length, 5);
+
+  const expectedDirect = [true, false, true, false, true]; // D, R, D, R, D
+  crossings.forEach((c, i) => {
+    assert.equal(c.retrograde, !expectedDirect[i]);
+    assert.ok(Math.abs(c.longitude - 300) < 1e-4);
+  });
 });
