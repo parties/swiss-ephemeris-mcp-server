@@ -10,14 +10,24 @@
 
 ## 0. Status
 
-SUP-356 (`calculate_secondary_progressions`) is **done**. SUP-351 (the `find_events` MCP tool
-surface) is **backlog**, so implementation of this ticket is still blocked. This document is the
-spec pass only.
+**Both blockers are done.** SUP-356 (`calculate_secondary_progressions`, PR #52, `4972a9f`) and
+SUP-351 (the `find_events` MCP tool surface, PR #53, `5ae27f2`) are both merged to `main`. This
+ticket is unblocked; the spec pass below has been re-verified against the actual shipped code
+(2026-08-10, after both merges) rather than against SUP-349's proposal alone.
 
-The parameter names below are written against **SUP-349 §3.1**, not against a shipped tool. Where
-SUP-351 ships something different, match SUP-351 and keep the *semantics* here. §8 lists the
-things SUP-351 must get right or this ticket becomes a refactor of it — those are worth reading
-before SUP-351 starts.
+The parameter names below were originally written against **SUP-349 §3.1** while SUP-351 was still
+backlog. They have since been checked line-by-line against the shipped `find_events` tool
+(`index.js`) and `calculate_secondary_progressions` (`index.js` + `lib/progressions.js`). One
+drift was found and corrected (§3, `year_length_days`). Everything else held up: engine primitives
+(`scanTransitingBody`, `findStations`, `findCrossings`, `natalContactsFor`, `relativeLunarProvider`,
+`annotateEclipses`, `eclipsesFor`), the `angle_method`/`house_frame` names and defaults, the orb
+resolver injection pattern, and the `DEFAULT_TRANSITING_BODIES` baseline all match what this
+document assumed.
+
+**§8 has been rewritten.** It was framed as "get SUP-351 to build this before it starts" — SUP-351
+already shipped without a `rate` concept (unsurprising; it wasn't asked to have one), so all five
+items are retrofit work inside `find_events` for *this* ticket's implementer, not a prerequisite on
+someone else's finished PR.
 
 **Confirmed: no new tool.** The event vocabulary — ingress, station, aspect, lunation — is
 identical at both rates; only the clock differs. A separate `find_progressed_event` would duplicate
@@ -177,7 +187,8 @@ This applies to more than the angles:
 
 - **Every `house_ingress` is birth-time sensitive in both frames** — natal cusps are birth-time
   derived too. SUP-349 §3.3's `house_ingress` shape carries no such flag. That is a gap in
-  transit mode as well; flag it to SUP-351 (§8).
+  transit mode as well; this ticket's implementer should fix it directly (§8, item 5) since
+  SUP-351 already shipped without it.
 - The magnitude is rate-dependent and much smaller for fast bodies: 1° of cusp error against the
   progressed Moon's 13.29 °/yr is only ~27 days. The formula handles this; a boolean does not.
 
@@ -226,12 +237,14 @@ Comfortable — no truncation logic is expected to fire, but Q9's `truncated` bl
 
 ## 3. Parameter surface
 
-Additions to SUP-349 §3.1. Names are proposals; match SUP-351 where it has already chosen.
+Additions to SUP-349 §3.1, checked against the shipped `find_events` schema (`index.js`, PR #53).
+`find_events` currently has no `rate`, `angle_method`, or `house_frame` parameter at all — house
+ingress is unconditionally computed against natal cusps, and there is no progression concept yet.
+This is new surface, not a rename of anything that exists.
 
 ```jsonc
 {
   "rate": "secondary_progression",   // "transit" (default) | "secondary_progression"
-  "year_length_days": 365.2422,      // matches calculate_secondary_progressions
   "angle_method": "solar_arc",       // "solar_arc" (default) | "naibod" — same as SUP-356
   "house_frame": "progressed"        // "progressed" (default) | "natal" — same as SUP-356
 }
@@ -239,13 +252,21 @@ Additions to SUP-349 §3.1. Names are proposals; match SUP-351 where it has alre
 
 - `rate`, not `mode` — `mode` is overloaded, and `rate` is SUP-349 Q10's own word. Leaves room for
   `"solar_arc"` and `"converse"` later.
-- `angle_method` / `house_frame` / `year_length_days` **must accept the same values and produce the
-  same results as `calculate_secondary_progressions`.** See §6.1 — that cross-tool identity is the
-  single most important acceptance test in this ticket.
-- All four echoed in `settings_used`, alongside `angle_method_used` / `house_frame_used` to match
-  SUP-356's naming.
-- Passing any of the three progression parameters with `rate: "transit"` must **error**, not be
-  silently ignored.
+- `angle_method` / `house_frame` **must accept the same values and produce the same results as
+  `calculate_secondary_progressions`.** See §6.1 — that cross-tool identity is the single most
+  important acceptance test in this ticket.
+- **`year_length_days` is not a request parameter — correction from the previous revision.**
+  Checked against the shipped `calculate_secondary_progressions` (`index.js`/`lib/progressions.js`):
+  it is `TROPICAL_YEAR_DAYS = 365.2422`, a fixed constant, merely *echoed back* as
+  `year_length_days` in the response. SUP-356 does not let a caller override it, and nothing in
+  this spec needs a non-tropical year — the earlier draft listing it as a fourth peer input
+  alongside `rate`/`angle_method`/`house_frame` misstated that precedent. `find_events` should do
+  the same: echo `year_length_days: TROPICAL_YEAR_DAYS` in `settings_used` for
+  `rate: "secondary_progression"`, and not accept it as input.
+- All three real inputs (`rate`, `angle_method`, `house_frame`) echoed in `settings_used`, alongside
+  `angle_method_used` / `house_frame_used` to match SUP-356's naming.
+- Passing `angle_method` or `house_frame` with `rate: "transit"` (or omitted, since `"transit"` is
+  the default) must **error**, not be silently ignored.
 
 **Window before birth: reject it.** `window_start` earlier than `birth_datetime` yields a negative
 elapsed-years value, and `birth + N days` with negative `N` is *the converse progressed chart* — a
@@ -303,8 +324,9 @@ All values measured 2026-08-10 against `vendor/swisseph` using only `test/fixtur
 
 ### 6.1 Cross-tool identity — the headline test
 
-For the same `(birth_datetime, latitude, longitude, target_date, angle_method, house_frame,
-year_length_days)`, the progressed positions `find_events` uses at instant *t* must match
+For the same `(birth_datetime, latitude, longitude, target_date, angle_method, house_frame)` —
+`year_length_days` is fixed at `TROPICAL_YEAR_DAYS` on both tools, not a variable to control for —
+the progressed positions `find_events` uses at instant *t* must match
 `calculate_secondary_progressions` at target date *t* to **1e-6°** for every body and angle. If
 these two tools disagree, the feature is wrong regardless of what else passes. Assert it at three
 dates against both `angle_method` values.
@@ -370,20 +392,35 @@ ASC +1.2999°, MC +0.9584°. Assert the emitted sensitivity number lands within 
 
 ---
 
-## 8. Feed back into SUP-351 before it starts
+## 8. Retrofit required in `find_events` — was "feed back into SUP-351," now this ticket's own work
 
-SUP-351 is still backlog, so these are cheap now and expensive later:
+SUP-351 shipped (PR #53, `5ae27f2`) before this spec pass reached it, with no `rate` concept, so
+none of the five items below made it in — expected, since nothing asked for one at the time. They
+are no longer a request to another ticket's owner; they are `find_events` changes this ticket's
+implementer makes directly. Verified against `index.js` on `main` post-#53:
 
-1. **Inject the orb resolver; do not reach for `MOIETIES` / `ORB_CLASSES` inside the search path.**
-   SUP-349 Q10 already required this and `lib/event-search.js` honours it (`orbAllowed` and
-   `orbAllowedFor` are both caller-supplied). The tool layer must not undo it.
-2. **Body and target defaults must be resolvable per rate**, not module constants. Ruling #2/#3
-   invert them.
-3. **Route eclipse annotation behind a rate check**, not behind "did we find any."
-4. **Window default and cap must be per-rate** (ruling #7).
-5. **Add `birth_time_sensitive: true` to `house_ingress` in transit mode too.** SUP-349 §3.3 omits
-   it, but natal cusps are birth-time derived — the flag is as warranted there as on an ASC contact.
-   This is a transit-mode correctness gap that SUP-357 merely made visible.
+1. **Orb resolver injection — already in place, no rework needed.** `find_events` builds
+   `aspectSettings` via `resolveAspectSettings({ includeMinor, orbOverrides, orbModel })` and reads
+   orbs through `orbAllowedFor(aspectSettings, ...)` (`index.js` ~1546-1549); the search path never
+   reaches for `MOIETIES`/`ORB_CLASSES` directly. Adding the ruling-#1 flat table is scoped to
+   extending `ORB_MODELS` (currently `['class', 'moiety']`, `lib/aspects.js:135`) and
+   `resolveAspectSettings`/`orbAllowedFor` with a third `"fixed"` model — the injection seam this
+   item asked for is already there.
+2. **Body and target defaults are still module constants, not rate-aware — needs a change.**
+   `DEFAULT_TRANSITING_BODIES` (`index.js:179`) is read directly at the `bodies` resolution site
+   (`index.js` ~1511); there is no per-rate branch. Ruling #2/#3's inverted defaults require this to
+   become a lookup keyed on `rate`.
+3. **Eclipse annotation is still unconditional — needs a rate gate.** `findEvents`'s lunation block
+   calls `eclipsesFor('solar', ...)`, `eclipsesFor('lunar', ...)`, then `annotateEclipses(...)`
+   unconditionally (`index.js` ~1675-1679). For `rate: "secondary_progression"` this must be skipped
+   entirely (§1.1), not called and left to find nothing near-term real eclipses.
+4. **Window cap is still a single constant — needs a per-rate value.** `MAX_EVENT_WINDOW_DAYS = 3653`
+   (`index.js:223`) is unconditional. Ruling #7's 10 yr default / 120 yr max for progressed mode
+   needs its own branch alongside the existing transit-mode cap.
+5. **`house_ingress` still carries no `birth_time_sensitive` field, in transit mode either —
+   confirmed absent.** The `house_ingress` event object (`index.js` ~1656-1665) has no such key.
+   Fixing this is in scope for both modes, not just progressed (§1.3): natal cusps are as
+   birth-time-derived as the Ascendant, and SUP-349 §3.3 never carried the flag.
 
 ---
 
