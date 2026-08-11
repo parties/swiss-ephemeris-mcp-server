@@ -62,6 +62,7 @@ import {
   natalContactsFor,
   wrap180,
   mod360,
+  signAndDegree,
 } from './lib/event-search.js';
 import { progressedBodyProvider, progressedMcProvider, ephemerisJdForTarget } from './lib/progressed-provider.js';
 
@@ -767,7 +768,7 @@ class SwissEphemerisServer {
           },
           {
             name: 'find_events',
-            description: 'Search a UTC window for time-domain astrological events: aspect contacts (`contacts[]`, grouped into orb episodes with every exact pass), and instants (`events[]`) - planetary stations, sign/house ingresses, and lunations (New/Full Moon by default, optionally the quarter or full eight-phase soli-lunar cycle via `lunation_phases`). At `rate: "transit"` (default) the moving side is transiting bodies, houses are the NATAL chart\'s own, and lunations carry eclipse annotation. At `rate: "secondary_progression"` the moving side is the day-for-a-year progressed chart instead (feeding calculate_secondary_progressions\' own arc/house math into the same search engine): progressed angles become searchable, houses can move with the progressed chart, defaults invert (see `bodies`/`orb_model`/`include_*`/`lunation_phases` below), and eclipse annotation is structurally absent (progressions have no eclipse analogue). Correctness comes from segmenting the window at the moving side\'s own stations and enumerating every target crossing in each monotone segment, not from a scan step - no pass can be skipped between samples.',
+            description: 'Search a UTC window for time-domain astrological events: aspect contacts (`contacts[]`, grouped into orb episodes with every exact pass), optional two-moving-body aspect contacts (`pair_contacts[]`, same episode shape, opt in via `include_pair_aspects` - SUP-361), and instants (`events[]`) - planetary stations, sign/house ingresses, and lunations (New/Full Moon by default, optionally the quarter or full eight-phase soli-lunar cycle via `lunation_phases`). At `rate: "transit"` (default) the moving side is transiting bodies, houses are the NATAL chart\'s own, and lunations carry eclipse annotation. At `rate: "secondary_progression"` the moving side is the day-for-a-year progressed chart instead (feeding calculate_secondary_progressions\' own arc/house math into the same search engine): progressed angles become searchable, houses can move with the progressed chart, defaults invert (see `bodies`/`orb_model`/`include_*`/`lunation_phases` below), and eclipse annotation is structurally absent (progressions have no eclipse analogue). Correctness comes from segmenting the window at the moving side\'s own stations and enumerating every target crossing in each monotone segment, not from a scan step - no pass can be skipped between samples.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -859,6 +860,15 @@ class SwissEphemerisServer {
                   type: 'string',
                   enum: ['class', 'moiety', 'fixed'],
                   description: 'Orb resolution model for contacts[]. Default depends on `rate`: "moiety" at "transit" (sums each body\'s half-orb and scales by the aspect\'s multiplier), "fixed" at "secondary_progression" (a flat 1° for major aspects / 0.5° for minors, independent of which bodies/points are involved). "class" is also available at either rate, using the fixed per-class tables. The progressed default inverts because a transit-scaled orb table leaves an outer-planet progressed contact "in orb" for centuries - see calculate_transits\' orb_model description for the moiety/class formulas.',
+                },
+                include_pair_aspects: {
+                  type: 'boolean',
+                  description: 'Opt in to two-moving-body aspect search (SUP-361): aspects between two members of `pair_bodies` - e.g. progressed Venus conjunct progressed Mars, or transiting Jupiter square transiting Saturn - reported in a separate top-level `pair_contacts[]`, never mixed into `contacts[]` (a pair has no natal point). Default false at either rate. Requires `event_types` to include "aspect" - there is no separate event category for these, same reasoning as `lunation_phases` not being its own category. The progressed Sun-Moon pair is deliberately included, not suppressed for overlapping with `lunation`: the lunation event carries the directed phase (which of Crescent/Balsamic, First/Last Quarter) that an undirected aspect row structurally cannot distinguish, while the aspect row carries the orb envelope (`enters_orb`/`leaves_orb`/`closest_approach`) the lunation event has no field for - see README.',
+                },
+                pair_bodies: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Which bodies\' unordered pairs to search when `include_pair_aspects` is true - e.g. ["Sun","Moon","Mars"] searches Sun-Moon, Sun-Mars, and Moon-Mars. Independent of `bodies`: `bodies` is the moving-to-natal set and also drives sign_ingress/house_ingress, so narrowing it (e.g. to ["Moon"] for a clean ingress timeline) must not silently zero out pairs, and widening it (e.g. to the outer planets) must not silently add 21 frozen pair rows. Default depends on `rate`, matching `bodies`\' own rate-keyed default regardless of what `bodies` was actually set to: Sun, Moon, Mercury, Venus, Mars (10 pairs) at "secondary_progression"; Mars, Jupiter, Saturn, Uranus, Neptune, Pluto, Chiron (21 pairs) at "transit". Ascendant/Midheaven are valid members (reachable the same way calculate_aspects can emit Ascendant-Midheaven under include_angles), but only produce pairs at rate "secondary_progression" with `include_angles` true - pairs inherit that gate, and are silently dropped (not an error) otherwise, same as the other exclusions below. They are deliberately excluded from the default set: each Ascendant/Midheaven sample is far more expensive than a real body\'s, so an explicit request is required. Two pairs are always excluded regardless of `pair_bodies`, silently rather than as an error - the excluded pairs are visible via `settings_used.pairs_searched`, the list actually run after exclusions: (1) (Sun, Midheaven) whenever both are progressed, at either `angle_method` - under "solar_arc" the progressed Midheaven is defined as natalMC + (progressedSun - natalSun), so their relative separation is a lifelong-constant natal fact, not a progressed event; under "naibod" it is not exactly constant but changes so slowly (~0.02deg/yr) it is not meaningfully better; (2) the lunar nodes, unconditionally - the true Node (this tool\'s only node_type) reverses direction from orbital wobble roughly once a year of progressed life, and a pair\'s rate is a difference, so that jitter shreds segmentation. Progressed Part of Fortune is never reachable here at all (same as `bodies`) - it is not a valid `pair_bodies` name, so requesting it errors rather than silently doing nothing.',
                 },
               },
               required: ['birth_datetime', 'latitude', 'longitude', 'window_start', 'window_end'],
@@ -1735,6 +1745,8 @@ class SwissEphemerisServer {
       lunation_phases,
       orb_overrides,
       orb_model,
+      include_pair_aspects,
+      pair_bodies,
     } = args;
 
     if (!birth_datetime || typeof birth_datetime !== 'string') {
@@ -1818,6 +1830,12 @@ class SwissEphemerisServer {
       throw new McpError(ErrorCode.InvalidParams, 'orb_overrides must be an object');
     }
     validateOrbModel(orb_model);
+    if (include_pair_aspects !== undefined && typeof include_pair_aspects !== 'boolean') {
+      throw new McpError(ErrorCode.InvalidParams, 'include_pair_aspects must be a boolean');
+    }
+    if (pair_bodies !== undefined && (!Array.isArray(pair_bodies) || !pair_bodies.every((b) => typeof b === 'string'))) {
+      throw new McpError(ErrorCode.InvalidParams, 'pair_bodies must be an array of strings');
+    }
 
     const validatedHouseSystem = validateHouseSystem(house_system);
     const validatedEventTypes = validateEventTypes(event_types);
@@ -1830,10 +1848,25 @@ class SwissEphemerisServer {
       }
     }
 
+    // pair_bodies (SUP-361 §3) is deliberately independent of `bodies` - its own rate-keyed
+    // default, not derived from whatever `bodies` was actually set to (spec ruling B item
+    // 1). Ascendant/Midheaven are valid names here (unlike `bodies`, which never accepts
+    // them) since an explicit pair request can reach them at rate "secondary_progression" -
+    // see the includeAngles-gated eligibility filter below, which drops them silently
+    // (rather than erroring) when that gate isn't open, same treatment as the other
+    // structural exclusions (§4).
+    const requestedPairBodies = Array.isArray(pair_bodies) && pair_bodies.length ? [...new Set(pair_bodies)] : defaultTransitingBodies;
+    for (const b of requestedPairBodies) {
+      if (!EVENT_TRANSITING_BODIES.has(b) && !ANGLE_SOURCE_NAMES.has(b)) {
+        throw new McpError(ErrorCode.InvalidParams, `Unknown pair body: ${b}`);
+      }
+    }
+
     const includeMinor = include_minor ?? false;
     const includeAngles = include_angles ?? isProgressed;
     const includeSouthNode = include_south_node ?? false;
     const includeVertex = include_vertex ?? false;
+    const includePairAspects = include_pair_aspects ?? false;
     // Resolution order: lunation_phases, then the deprecated include_quarter_moons alias
     // (true -> "quarters", false -> "syzygy"), then the rate-keyed default - "syzygy" at
     // "transit" (bit-for-bit the shipped behaviour), "eight_phase" at
@@ -1944,6 +1977,13 @@ class SwissEphemerisServer {
       ascProvider = ascendantProviderFor(progressedFrameAt);
     }
 
+    // Provider lookup for a pair_bodies member (SUP-361): a real body goes through
+    // providerFor same as `bodies`/`targets` do; Ascendant/Midheaven reuse the same
+    // pseudo-source providers the progressed-angle contacts block below builds (only
+    // non-null when isProgressed, which is also the only case the eligibility filter lets
+    // an angle name reach this far).
+    const pairProviderFor = (name) => (name === 'Midheaven' ? mcProvider : name === 'Ascendant' ? ascProvider : providerFor(name));
+
     // Birth-time sensitivity, quantified (spec §1.3) - progressed mode only. One extra
     // natal chart at birth + 1 minute yields the degrees-per-birth-minute shift for all
     // four angles and all twelve cusps at once; `elapsedYears`/arc's own dependence on
@@ -1967,6 +2007,7 @@ class SwissEphemerisServer {
 
     const contacts = [];
     const events = [];
+    const pairContacts = [];
 
     // Shared aspect-episode builder for both real moving bodies and (progressed-mode only)
     // the Ascendant/Midheaven pseudo-sources below - same output shape either way,
@@ -2183,6 +2224,124 @@ class SwissEphemerisServer {
       }
     }
 
+    // Two-moving-body aspect search (SUP-361): unordered pairs of pair_bodies, structurally
+    // excluded per spec §4 - computed regardless of include_pair_aspects (cheap
+    // combinatorics, no provider calls) so settings_used.pairs_searched can preview what a
+    // request would run before the feature is switched on; only actually searched when
+    // include_pair_aspects is true and "aspect" is requested (ruling B item 3 - no separate
+    // event category for these).
+    const isAnglePairName = (name) => ANGLE_SOURCE_NAMES.has(name);
+    const anglePairGateOpen = isProgressed && includeAngles;
+    const eligiblePairs = [];
+    for (let i = 0; i < requestedPairBodies.length; i++) {
+      for (let j = i + 1; j < requestedPairBodies.length; j++) {
+        const bodyA = requestedPairBodies[i];
+        const bodyB = requestedPairBodies[j];
+        if (bodyA === 'North Node' || bodyB === 'North Node') continue; // §4.1
+        if ((isAnglePairName(bodyA) || isAnglePairName(bodyB)) && !anglePairGateOpen) continue; // §4.4/§4.5
+        if (isProgressed && ((bodyA === 'Sun' && bodyB === 'Midheaven') || (bodyA === 'Midheaven' && bodyB === 'Sun'))) continue; // §4.2 - constant under solar_arc for every chart
+        eligiblePairs.push([bodyA, bodyB]);
+      }
+    }
+
+    if (includePairAspects && validatedEventTypes.includes('aspect')) {
+      // Per-body scan, cached across pairs sharing a body (e.g. every progressed Moon
+      // pair) - reused both to compose the relative provider below and to pick which side
+      // of a pair is "faster" (spec §8.3).
+      const pairBodyScans = new Map();
+      const scanPairBody = (name) => {
+        if (pairBodyScans.has(name)) return pairBodyScans.get(name);
+        const provider = pairProviderFor(name);
+        const { segments } = scanTransitingBody(provider, startJd, endJd, scanStepDays);
+        // Mean rate over the whole window, not instantaneous (§8.3: Mercury and Venus trade
+        // places by progression, so a single-instant speed comparison can pick the wrong
+        // side). segments[0].uLo / the last segment's uHi are the unwrapped cumulative
+        // longitude scanTransitingBody already tracked internally, so net arc traveled
+        // falls out for free instead of needing a second pass over the series.
+        const netArc = segments.length ? segments[segments.length - 1].uHi - segments[0].uLo : 0;
+        const entry = { provider, meanRate: netArc / (endJd - startJd) };
+        pairBodyScans.set(name, entry);
+        return entry;
+      };
+
+      for (const [bodyA, bodyB] of eligiblePairs) {
+        const scanA = scanPairBody(bodyA);
+        const scanB = scanPairBody(bodyB);
+        const fasterName = Math.abs(scanA.meanRate) >= Math.abs(scanB.meanRate) ? bodyA : bodyB;
+        const fastScan = fasterName === bodyA ? scanA : scanB;
+        const slowScan = fasterName === bodyA ? scanB : scanA;
+
+        // Composed the same way house_frame "progressed"'s relativeMovingProvider is
+        // (fast.longitude - slow.longitude): directed separation comes out faster-minus-
+        // slower (spec §8.3) - Sun-Moon lands as Moon-Sun, matching findLunations and
+        // lib/moon-phase.js with no special case. Segmenting THIS provider's own stations
+        // (rather than reusing either body's individual scan) is what finds relative
+        // stations - real for a general pair, unlike the Sun-Moon relative rate lunations
+        // compose, which never reaches zero (spec §8.4).
+        const relativeProvider = relativeMovingProvider(fastScan.provider, slowScan.provider);
+        const { segments: relativeSegments, stations: relativeStations } = scanTransitingBody(relativeProvider, startJd, endJd, scanStepDays);
+
+        for (const [aspectName, aspectAngle] of Object.entries(aspectDefs)) {
+          const orbAllowed = orbAllowedFor(aspectSettings, bodyA, bodyB, aspectName);
+          const category = Object.hasOwn(MAJOR_ASPECTS, aspectName) ? 'major' : 'minor';
+          const searchAngles = (aspectAngle === 0 || aspectAngle === 180) ? [aspectAngle] : [aspectAngle, 360 - aspectAngle];
+
+          for (const searchAngle of searchAngles) {
+            for (const contact of findContacts({
+              provider: relativeProvider, segments: relativeSegments, stations: relativeStations,
+              natalLongitude: 0, aspectAngle: searchAngle, orbAllowed,
+              startJd, endJd,
+            })) {
+              const aSensitive = isAnglePairName(bodyA);
+              const bSensitive = isAnglePairName(bodyB);
+              const birthTimeSensitive = aSensitive || bSensitive;
+              const row = {
+                body_a: bodyA,
+                body_b: bodyB,
+                faster_body: fasterName,
+                aspect: aspectName,
+                category,
+                aspect_angle: aspectAngle,
+                orb_allowed: contact.orb_allowed,
+                enters_orb: contact.enters_orb,
+                leaves_orb: contact.leaves_orb,
+                // Re-read each body's OWN absolute longitude/speed at the pass instant
+                // (spec §8.1/§8.2) - contact.passes' own longitude/sign/degree/retrograde
+                // are the RELATIVE separation's, which would be a well-formed but
+                // meaningless position/direction for either body, so they're discarded here
+                // rather than spread through.
+                passes: contact.passes.map(({ jd, datetime }) => {
+                  const posA = scanA.provider.positionAt(jd);
+                  const posB = scanB.provider.positionAt(jd);
+                  return {
+                    datetime,
+                    body_a: { longitude: mod360(posA.longitude), ...signAndDegree(posA.longitude), speed: posA.speed, retrograde: posA.speed < 0 },
+                    body_b: { longitude: mod360(posB.longitude), ...signAndDegree(posB.longitude), speed: posB.speed, retrograde: posB.speed < 0 },
+                  };
+                }),
+                closest_approach: contact.closest_approach,
+                birth_time_sensitive: birthTimeSensitive,
+                enters_orb_truncated: contact.enters_orb_truncated,
+                leaves_orb_truncated: contact.leaves_orb_truncated,
+              };
+              if (isProgressed && birthTimeSensitive) {
+                const shiftDeg = (aSensitive ? (angleShiftPerMinute[bodyA] ?? 0) : 0)
+                  + (bSensitive ? (angleShiftPerMinute[bodyB] ?? 0) : 0);
+                // Evaluated at the contact's own instant, off the RELATIVE rate (spec
+                // ruling #9) - a pair's date sensitivity depends on how fast the gap
+                // between the two points is closing, not either body's absolute speed.
+                const contactRate = Math.abs(relativeProvider.positionAt(jdFromDate(new Date(contact.closest_approach.datetime))).speed);
+                if (shiftDeg > 0 && contactRate > RATE_EPSILON) row.date_uncertainty_days_per_birth_minute = shiftDeg / contactRate;
+              }
+              pairContacts.push(row);
+            }
+          }
+        }
+      }
+
+      pairContacts.sort((a, b) => new Date(a.enters_orb) - new Date(b.enters_orb));
+    }
+
     if (validatedEventTypes.includes('lunation')) {
       const sunProvider = providerFor('Sun');
       const moonProvider = providerFor('Moon');
@@ -2218,6 +2377,7 @@ class SwissEphemerisServer {
         truncated: windowTruncated,
       },
       contacts,
+      pair_contacts: pairContacts,
       events,
       settings_used: {
         event_types: validatedEventTypes,
@@ -2235,6 +2395,13 @@ class SwissEphemerisServer {
         lunation_phases: lunationPhases,
         lunation_phase_scheme: PHASE_SCHEME,
         node_type: 'true',
+        include_pair_aspects: includePairAspects,
+        pair_bodies: requestedPairBodies,
+        // The pair list actually eligible after §4's exclusions - visible regardless of
+        // include_pair_aspects (spec ruling B: "so a caller cannot tell an excluded pair
+        // from a pair that produced nothing"), so this is populated even when the feature
+        // itself is off.
+        pairs_searched: eligiblePairs.map(([body_a, body_b]) => ({ body_a, body_b })),
         ...(isProgressed ? {
           angle_method_used: validatedAngleMethod,
           house_frame_used: validatedHouseFrame,
