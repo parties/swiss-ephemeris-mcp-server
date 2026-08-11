@@ -477,8 +477,8 @@ test('orb_model rejects unknown values', () => {
   );
 });
 
-test('ORB_MODELS exports exactly the two known model names', () => {
-  assert.deepEqual(ORB_MODELS, ['class', 'moiety']);
+test('ORB_MODELS exports exactly the three known model names', () => {
+  assert.deepEqual(ORB_MODELS, ['class', 'moiety', 'fixed']);
 });
 
 // SUP-175/T3: moiety pair-orb resolver. orbAllowed = (MOIETIES[a] + MOIETIES[b]) *

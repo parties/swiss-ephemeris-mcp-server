@@ -47,7 +47,7 @@ import {
   computeArcDegrees,
   computeFictitiousLongitude,
 } from './lib/progressions.js';
-import { jdFromDate, seriesFor as ephemerisSeriesFor, positionAt as ephemerisPositionAt, eclipsesFor } from './lib/ephemeris-series.js';
+import { jdFromDate, dateFromJd, seriesFor as ephemerisSeriesFor, positionAt as ephemerisPositionAt, eclipsesFor } from './lib/ephemeris-series.js';
 import {
   scanTransitingBody,
   findContacts,
@@ -57,7 +57,9 @@ import {
   annotateEclipses,
   natalContactsFor,
   wrap180,
+  mod360,
 } from './lib/event-search.js';
+import { progressedBodyProvider, progressedMcProvider, ephemerisJdForTarget } from './lib/progressed-provider.js';
 
 function validateOrbModel(orbModel) {
   if (orbModel !== undefined && !ORB_MODELS.includes(orbModel)) {
@@ -163,6 +165,21 @@ function validateHouseFrame(value) {
   return value;
 }
 
+// find_events rate (SUP-357/SUP-359): "transit" (default, unchanged) or
+// "secondary_progression", which swaps in a position provider over the day-for-a-year
+// technique (lib/progressed-provider.js) feeding the same rate-agnostic engine. "converse"
+// (birth-ward progressions) is deliberately not offered yet - see the window_start/
+// birth_datetime check in findEvents, which reserves it rather than silently computing it.
+const RATES = ['transit', 'secondary_progression'];
+
+function validateRate(value) {
+  if (value === undefined) return 'transit';
+  if (typeof value !== 'string' || !RATES.includes(value)) {
+    throw new McpError(ErrorCode.InvalidParams, `rate must be one of: ${RATES.join(', ')}`);
+  }
+  return value;
+}
+
 // find_events (SUP-349/SUP-351) --------------------------------------------------------
 
 // Valid transiting-side bodies: exactly DEFAULT_ASPECT_BODIES (17) - the set
@@ -172,11 +189,17 @@ function validateHouseFrame(value) {
 // gated behind a flag the way they are on the natal side.
 const EVENT_TRANSITING_BODIES = new Set(DEFAULT_ASPECT_BODIES);
 
-// Default transiting set (spec Q9): the bodies slow enough to define forecasting
-// "chapters" rather than trigger them. The Moon is 21.7x the rest of the output alone
-// (spec §4.3) and is excluded from the default along with Sun/Mercury/Venus/asteroids/
-// Lilith/North Node - all still reachable via an explicit `bodies` request.
-const DEFAULT_TRANSITING_BODIES = ['Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto', 'Chiron'];
+// Default transiting set (spec Q9), rate-keyed (SUP-357/SUP-359 §2/§8 retrofit item 2):
+// at the transit rate, the bodies slow enough to define forecasting "chapters" rather
+// than trigger them - the Moon is 21.7x the rest of the output alone (spec §4.3) and is
+// excluded along with Sun/Mercury/Venus/asteroids/Lilith/North Node, all still reachable
+// via an explicit `bodies` request. At the progressed rate the ruling inverts: the
+// progressed Moon IS the technique (13.29 deg/yr vs. an outer planet's few degrees over a
+// lifetime), so the default is the fast/personal set instead.
+const DEFAULT_TRANSITING_BODIES_BY_RATE = {
+  transit: ['Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune', 'Pluto', 'Chiron'],
+  secondary_progression: ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars'],
+};
 
 // Bodies that can station (spec Q5), 13 total. Sun/Moon never station (zero measured
 // speed-sign changes) and mean Apogee (Lilith) is always direct by construction, so no
@@ -198,6 +221,17 @@ const EVENT_TYPES = ['aspect', 'station', 'sign_ingress', 'house_ingress', 'luna
 // derived from the Ascendant.
 const BIRTH_TIME_SENSITIVE_TARGETS = new Set(['Ascendant', 'Midheaven', 'Part of Fortune', 'Vertex']);
 
+// Progressed-mode-only moving-side pseudo-sources (spec §1.3/§4): never real `bodies`
+// (EVENT_TRANSITING_BODIES excludes them, same as the natal-side ANGLE_BODIES/Vertex
+// gating), reached only via include_angles, and only for aspect contacts.
+const ANGLE_SOURCE_NAMES = new Set(['Ascendant', 'Midheaven']);
+
+// Guards the birth-time-sensitivity division (progressed mode) against a near-zero
+// relative rate blowing up into an absurd days-per-minute figure - a body/cusp pairing
+// that's essentially stationary at the reference instant has no meaningful answer to
+// "how many days does a birth-time-minute cost", so the field is omitted there instead.
+const RATE_EPSILON = 1e-9;
+
 const EVENT_SIGNS = [
   'Aries', 'Taurus', 'Gemini', 'Cancer', 'Leo', 'Virgo',
   'Libra', 'Scorpio', 'Sagittarius', 'Capricorn', 'Aquarius', 'Pisces',
@@ -216,11 +250,18 @@ function signIndexForLongitude(longitude) {
   return Math.floor((((longitude % 360) + 360) % 360) / 30);
 }
 
-// Max window (spec Q9): 10 years, chosen because it's still cheap (3653 daily rows per
-// body, one swetest spawn each). A longer request is clamped rather than rejected, and
-// the clamp is surfaced via `window.truncated` - "no silent truncation" means the caller
-// can tell, not that the window can never be shortened.
-const MAX_EVENT_WINDOW_DAYS = 3653;
+// Max window (spec Q9), rate-keyed (SUP-357/SUP-359 §2/§8 retrofit item 4): at the
+// transit rate, 10 years, chosen because it's still cheap (3653 daily rows per body, one
+// swetest spawn each). A longer request is clamped rather than rejected, and the clamp is
+// surfaced via `window.truncated` - "no silent truncation" means the caller can tell, not
+// that the window can never be shortened. At the progressed rate a query is inherently
+// lifetime-scale (10 years of window is 10 degrees of progressed Sun motion, nowhere near
+// enough to answer anything the technique is used for), so the cap is a life bound - 120
+// years - instead of an ephemeris-cost one.
+const MAX_EVENT_WINDOW_DAYS_BY_RATE = {
+  transit: 3653,
+  secondary_progression: Math.round(120 * TROPICAL_YEAR_DAYS),
+};
 
 function validateEventTypes(value) {
   if (value === undefined) return EVENT_TYPES;
@@ -231,12 +272,104 @@ function validateEventTypes(value) {
 }
 
 // Position provider (spec Q10) over lib/ephemeris-series.js's swetest-backed functions -
-// the only transiting-side provider this ticket ships; progressions/solar-arc providers
-// are a future drop-in against the same lib/event-search.js engine.
+// the transiting-side (rate: "transit") provider. The progressed-rate real-body/MC
+// providers live in lib/progressed-provider.js (pure, no swetest call of their own beyond
+// what ephemeris-series.js already does); the progressed Ascendant/moving-cusp providers
+// below need an actual swetest -house lookup and so stay next to calculateEphemeris.
 function transitProviderFor(body) {
   return {
     seriesFor: (startJd, endJd, stepDays) => ephemerisSeriesFor(body, startJd, endJd, stepDays),
     positionAt: (atJd) => ephemerisPositionAt(body, atJd),
+  };
+}
+
+// Adaptive coarse grid (SUP-357/SUP-359 §1.2 exception): start from the same
+// ceiling-based row generation lib/ephemeris-series.js's seriesFor uses, then recursively
+// halve any adjacent pair whose longitude jumps more than 90 degrees. Only the progressed
+// Ascendant and moving house cusps need this - their rate per degree of ARMC is unbounded
+// near the poles, so a fixed step can't be proven safe the way it can for every real body
+// (spec's own margin-table argument, which assumes bounded speed). `MIN_SPAN_JD` is a
+// floor against runaway recursion at a genuine discontinuity (e.g. exactly at a pole);
+// well below it a jump is presumed real, not under-sampled.
+const MIN_ADAPTIVE_SPAN_JD = 1 / 1440; // 1 minute of target time
+
+function adaptiveJdGrid(startJd, endJd, stepDays, longitudeAt) {
+  const steps = Math.max(0, Math.ceil((endJd - startJd) / stepDays - 1e-9));
+  const base = [];
+  for (let i = 0; i <= steps; i++) base.push(i === steps ? endJd : Math.min(startJd + i * stepDays, endJd));
+
+  const result = [base[0]];
+  const subdivide = (loJd, hiJd) => {
+    const jump = Math.abs(wrap180(longitudeAt(hiJd) - longitudeAt(loJd)));
+    if (jump > 90 && hiJd - loJd > MIN_ADAPTIVE_SPAN_JD) {
+      const midJd = (loJd + hiJd) / 2;
+      subdivide(loJd, midJd);
+      subdivide(midJd, hiJd);
+    } else {
+      result.push(hiJd);
+    }
+  };
+  for (let i = 1; i < base.length; i++) subdivide(base[i - 1], base[i]);
+  return result;
+}
+
+// Progressed Ascendant provider: goes through progressedFrameAt (computeFictitiousLongitude
+// under the hood, keeping its `+ natalLongitude` term) for longitude; speed is a central
+// numeric difference (h = 1 day of target time - safely larger than the ~6-minute plateau
+// calculateEphemeris's whole-second time truncation creates, so the difference is never
+// spuriously zero). No analytic ASC speed formula exists the way MC has one via the Sun.
+function ascendantProviderFor(progressedFrameAt) {
+  const lonAt = (jd) => progressedFrameAt(jd).ascendant;
+  const speedAt = (targetJd) => wrap180(lonAt(targetJd + 1) - lonAt(targetJd - 1)) / 2;
+  return {
+    positionAt: (targetJd) => ({ longitude: lonAt(targetJd), speed: speedAt(targetJd) }),
+    seriesFor(startJd, endJd, stepDays) {
+      const jds = adaptiveJdGrid(startJd, endJd, stepDays, lonAt);
+      return jds.map((jd) => ({ jd, longitude: lonAt(jd), speed: speedAt(jd) }));
+    },
+  };
+}
+
+// A single progressed house cusp as a provider, same shape/precision tradeoffs as the
+// Ascendant provider above (and sharing its progressedFrameAt cache - a house computation
+// yields all 12 cusps at once, so querying cusp 3 after cusp 7 at the same instant costs
+// nothing extra).
+function cuspProviderFor(progressedFrameAt, house) {
+  const lonAt = (jd) => progressedFrameAt(jd).houses[house].longitude;
+  const speedAt = (targetJd) => wrap180(lonAt(targetJd + 1) - lonAt(targetJd - 1)) / 2;
+  return {
+    positionAt: (targetJd) => ({ longitude: lonAt(targetJd), speed: speedAt(targetJd) }),
+    seriesFor(startJd, endJd, stepDays) {
+      const jds = adaptiveJdGrid(startJd, endJd, stepDays, lonAt);
+      return jds.map((jd) => ({ jd, longitude: lonAt(jd), speed: speedAt(jd) }));
+    },
+  };
+}
+
+// house_frame: "progressed" composition (spec §1.1.1): the cusps move too, so house_ingress
+// becomes a two-moving-point search over lambda_body(t) - cusp_i(t), the same pattern
+// relativeLunarProvider (lib/event-search.js) uses for the Sun-Moon relative longitude -
+// scanTransitingBody then segments at the stationary points of the DIFFERENCE, and
+// `direction` on the resulting crossings reflects the relative rate's sign rather than the
+// body's own (a body can be direct while what's actually closing the gap is the cusp).
+// Composed via positionAt rather than zipping seriesFor rows index-for-index the way
+// relativeLunarProvider does: a cusp/Ascendant provider's grid can be adaptively
+// subdivided (finer than the body's plain grid), so the two sides' rows aren't guaranteed
+// to line up positionally the way Sun/Moon's identical, non-adaptive grids do.
+function relativeMovingProvider(bodyProvider, cuspProvider) {
+  const composeAt = (jd) => {
+    const b = bodyProvider.positionAt(jd);
+    const c = cuspProvider.positionAt(jd);
+    return { longitude: mod360(b.longitude - c.longitude), speed: b.speed - c.speed };
+  };
+  return {
+    positionAt: composeAt,
+    seriesFor(startJd, endJd, stepDays) {
+      const bodyJds = bodyProvider.seriesFor(startJd, endJd, stepDays).map((r) => r.jd);
+      const cuspJds = cuspProvider.seriesFor(startJd, endJd, stepDays).map((r) => r.jd);
+      const jds = [...new Set([...bodyJds, ...cuspJds])].sort((a, b) => a - b);
+      return jds.map((jd) => ({ jd, ...composeAt(jd) }));
+    },
   };
 }
 
@@ -593,7 +726,7 @@ class SwissEphemerisServer {
           },
           {
             name: 'find_events',
-            description: 'Search a UTC window for time-domain astrological events: transiting-to-natal aspect contacts (`contacts[]`, grouped into orb episodes with every exact pass), and instants (`events[]`) - planetary stations, sign/house ingresses (against the NATAL chart\'s houses, never the transiting moment\'s own), and lunations (New/Full Moon, optionally quarters) with eclipse annotation. Correctness comes from segmenting the window at the transiting body\'s own stations and enumerating every target crossing in each monotone segment, not from a scan step - no pass can be skipped between samples.',
+            description: 'Search a UTC window for time-domain astrological events: aspect contacts (`contacts[]`, grouped into orb episodes with every exact pass), and instants (`events[]`) - planetary stations, sign/house ingresses, and lunations (New/Full Moon, optionally quarters). At `rate: "transit"` (default) the moving side is transiting bodies, houses are the NATAL chart\'s own, and lunations carry eclipse annotation. At `rate: "secondary_progression"` the moving side is the day-for-a-year progressed chart instead (feeding calculate_secondary_progressions\' own arc/house math into the same search engine): progressed angles become searchable, houses can move with the progressed chart, defaults invert (see `bodies`/`orb_model`/`include_*` below), and eclipse annotation is structurally absent (progressions have no eclipse analogue). Correctness comes from segmenting the window at the moving side\'s own stations and enumerating every target crossing in each monotone segment, not from a scan step - no pass can be skipped between samples.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -611,16 +744,31 @@ class SwissEphemerisServer {
                 },
                 window_start: {
                   type: 'string',
-                  description: 'Start of the UTC search window, ISO8601, e.g., 2026-01-01T00:00:00Z',
+                  description: 'Start of the UTC search window, ISO8601, e.g., 2026-01-01T00:00:00Z. Must not be earlier than birth_datetime when rate is "secondary_progression" (that would be a converse progression, a distinct technique not offered yet).',
                 },
                 window_end: {
                   type: 'string',
-                  description: 'End of the UTC search window, ISO8601. Must be after window_start. A window longer than 10 years is clamped to 10 years from window_start rather than rejected - see `window.truncated` on the result.',
+                  description: 'End of the UTC search window, ISO8601. Must be after window_start. A window longer than the per-rate cap is clamped rather than rejected - see `window.truncated` on the result. Cap is 10 years at rate "transit", 120 years at rate "secondary_progression" (a progressed query is inherently lifetime-scale; 10 years of window is 10 degrees of progressed Sun motion).',
                 },
                 event_types: {
                   type: 'array',
                   items: { type: 'string', enum: ['aspect', 'station', 'sign_ingress', 'house_ingress', 'lunation'] },
-                  description: 'Which event categories to search. Default: all five. "aspect" populates `contacts[]`; the other four populate `events[]`.',
+                  description: 'Which event categories to search. Default: all five. "aspect" populates `contacts[]`; the other four populate `events[]`. All five carry over at rate "secondary_progression" - eclipse annotation is the only thing without a progressed analogue, and that is an annotation on "lunation", not a category of its own.',
+                },
+                rate: {
+                  type: 'string',
+                  enum: ['transit', 'secondary_progression'],
+                  description: '"transit" (default): the moving side is transiting bodies at their real ephemeris position, matching calculate_transits. "secondary_progression": the moving side is the day-for-a-year progressed chart instead - progressed positions here match calculate_secondary_progressions exactly (same angle_method/house_frame semantics), and several defaults invert relative to "transit" (see `bodies`, `orb_model`, `include_angles`, `include_quarter_moons`). `angle_method`/`house_frame` require this to be "secondary_progression" and error otherwise.',
+                },
+                angle_method: {
+                  type: 'string',
+                  enum: ['solar_arc', 'naibod'],
+                  description: 'Requires rate "secondary_progression" (errors otherwise). Same meaning and default ("solar_arc") as calculate_secondary_progressions - the convention the progressed Midheaven/Ascendant are directed by. Echoed as `settings_used.angle_method_used`.',
+                },
+                house_frame: {
+                  type: 'string',
+                  enum: ['progressed', 'natal'],
+                  description: 'Requires rate "secondary_progression" (errors otherwise). Same meaning and default ("progressed") as calculate_secondary_progressions. Under "progressed", house_ingress cusps move with the progressed chart too - `direction` on those events reflects the sign of the body-relative-to-cusp rate, not the body\'s own speed, since a body can be direct while a moving cusp is what\'s actually closing the gap. Under "natal", house_ingress uses the fixed birth chart cusps, same as rate "transit". Echoed as `settings_used.house_frame_used`.',
                 },
                 house_system: {
                   type: 'string',
@@ -629,7 +777,7 @@ class SwissEphemerisServer {
                 bodies: {
                   type: 'array',
                   items: { type: 'string' },
-                  description: 'TRANSITING side. Default: Mars, Jupiter, Saturn, Uranus, Neptune, Pluto, Chiron - the bodies slow enough to define forecasting "chapters" rather than trigger them. The transiting Moon is excluded from the default (it alone is 21.7x the rest of the output) but reachable by explicit request, as are Sun/Mercury/Venus/asteroids/Lilith/North Node. Angle bodies and Vertex can never transit - they sweep the whole zodiac daily and are excluded unconditionally. Governs `contacts[]`, `station` events (further limited to the 13 bodies that can station; Sun/Moon/Lilith/North Node never emit one even if listed here), and `sign_ingress`/`house_ingress` events.',
+                  description: 'MOVING side. Default depends on `rate`. At "transit" (default): Mars, Jupiter, Saturn, Uranus, Neptune, Pluto, Chiron - the bodies slow enough to define forecasting "chapters" rather than trigger them; the transiting Moon is excluded (it alone is 21.7x the rest of the output) but reachable by explicit request, as are Sun/Mercury/Venus/asteroids/Lilith/North Node. At "secondary_progression": Sun, Moon, Mercury, Venus, Mars - inverted, since the progressed Moon (13.29 deg/yr) IS the technique and an outer planet moves only a few degrees in a lifetime; the rest are still reachable by explicit request. Angle bodies and Vertex can never appear here - progressed Ascendant/Midheaven are reached via `include_angles` instead, not `bodies`. Governs `contacts[]` and `sign_ingress`/`house_ingress` events; `station` events always search the fixed 13-body station-capable set regardless of this parameter (unaffected by either default) - see `events[].type === "station"`.',
                 },
                 targets: {
                   type: 'array',
@@ -642,7 +790,7 @@ class SwissEphemerisServer {
                 },
                 include_angles: {
                   type: 'boolean',
-                  description: 'Include natal Ascendant, Midheaven and Part of Fortune as targets. Default false.',
+                  description: 'Default depends on `rate`: false at "transit", true at "secondary_progression" (matching calculate_secondary_progressions - progressed angle contacts are this rate\'s headline output). At "transit", adds natal Ascendant/Midheaven/Part of Fortune as targets. At "secondary_progression", ALSO adds progressed Ascendant/Midheaven as moving-side sources for `contacts[]` (never as `bodies`/station/ingress sources) alongside the natal-side addition - matching calculate_secondary_progressions\' asymmetry, including that progressed Part of Fortune is never a source (which day/night formula applies to a progressed sect is unsettled). Contacts and house_ingress events carry a `date_uncertainty_days_per_birth_minute` figure at this rate whenever a birth-time-sensitive point is involved, since a degree of angle error there is roughly a year of date error - about 13x worse than at "transit".',
                 },
                 include_south_node: {
                   type: 'boolean',
@@ -654,17 +802,17 @@ class SwissEphemerisServer {
                 },
                 include_quarter_moons: {
                   type: 'boolean',
-                  description: 'Include First/Last Quarter alongside New/Full Moon in lunation events. Default false - New and Full carry the overwhelming majority of the reading, and the default aims for ~25 lunations/year rather than ~50.',
+                  description: 'Include First/Last Quarter alongside New/Full Moon in lunation events. Default depends on `rate`: false at "transit" (New/Full alone already run ~25/yr; quarters would double that with comparatively little added signal), true at "secondary_progression" (the ~29.31-year progressed lunation cycle is conventionally read by phase, and even with quarters a 90-year window yields only ~12 total).',
                 },
                 orb_overrides: {
                   type: 'object',
-                  description: 'Per-aspect orb overrides in degrees for contacts[], e.g. {"conjunction": 10}. Also accepts the per-class shape ({"angle": {"square": 4}}, {"derived": {"square": 2}}) under orb_model "class", or the {"moieties": {...}, "multipliers": {...}} shape under "moiety" - same as calculate_transits.',
+                  description: 'Per-aspect orb overrides in degrees for contacts[], e.g. {"conjunction": 10}. Also accepts the per-class shape ({"angle": {"square": 4}}, {"derived": {"square": 2}}) under orb_model "class", or the {"moieties": {...}, "multipliers": {...}} shape under "moiety" - same as calculate_transits. orb_model "fixed" takes flat aspect-name keys only (no class/moiety nesting), same shape as "class" minus the nested form.',
                   additionalProperties: { type: ['number', 'object'] },
                 },
                 orb_model: {
                   type: 'string',
-                  enum: ['class', 'moiety'],
-                  description: 'Orb resolution model for contacts[]. "moiety" (default) sums each body\'s half-orb and scales by the aspect\'s multiplier; "class" uses the fixed per-class tables. Both are echoed in settings_used, and the choice can move a contact\'s orb episode boundaries by months for the same pair - see calculate_transits\' orb_model description for the formula.',
+                  enum: ['class', 'moiety', 'fixed'],
+                  description: 'Orb resolution model for contacts[]. Default depends on `rate`: "moiety" at "transit" (sums each body\'s half-orb and scales by the aspect\'s multiplier), "fixed" at "secondary_progression" (a flat 1° for major aspects / 0.5° for minors, independent of which bodies/points are involved). "class" is also available at either rate, using the fixed per-class tables. The progressed default inverts because a transit-scaled orb table leaves an outer-planet progressed contact "in orb" for centuries - see calculate_transits\' orb_model description for the moiety/class formulas.',
                 },
               },
               required: ['birth_datetime', 'latitude', 'longitude', 'window_start', 'window_end'],
@@ -1426,11 +1574,15 @@ class SwissEphemerisServer {
     };
   }
 
-  // find_events (SUP-349 §3/§5 steps 5-6): the MCP surface over lib/event-search.js's
-  // engine (SUP-350). Adds no search logic of its own - every date comes from
+  // find_events (SUP-349 §3/§5 steps 5-6, extended by SUP-357/SUP-359 for `rate`): the MCP
+  // surface over lib/event-search.js's rate-agnostic engine (SUP-350). Adds no search logic
+  // of its own - every date comes from
   // scanTransitingBody/findContacts/findStations/findCrossings/findLunations, called once
-  // per transiting body (the coarse scan and its stations/segments are reused across that
-  // body's contacts, stations, and ingresses) and once overall for lunations.
+  // per moving body (the coarse scan and its stations/segments are reused across that
+  // body's contacts and ingresses) and once overall for lunations. `rate:
+  // "secondary_progression"` swaps in a position provider over the day-for-a-year
+  // technique (lib/progressed-provider.js plus the progressed-frame helpers below) feeding
+  // the exact same engine - see the SUP-357 spec for the full ruling this implements.
   findEvents(args) {
     const {
       birth_datetime,
@@ -1439,6 +1591,9 @@ class SwissEphemerisServer {
       window_start,
       window_end,
       event_types,
+      rate,
+      angle_method,
+      house_frame,
       house_system,
       bodies,
       targets,
@@ -1453,6 +1608,10 @@ class SwissEphemerisServer {
 
     if (!birth_datetime || typeof birth_datetime !== 'string') {
       throw new McpError(ErrorCode.InvalidParams, 'birth_datetime parameter is required and must be a string');
+    }
+    const birthDate = new Date(birth_datetime);
+    if (isNaN(birthDate.getTime())) {
+      throw new McpError(ErrorCode.InvalidParams, 'birth_datetime must be a valid ISO8601 datetime');
     }
     if (typeof latitude !== 'number' || latitude < -90 || latitude > 90) {
       throw new McpError(ErrorCode.InvalidParams, 'latitude must be a number between -90 and 90');
@@ -1477,6 +1636,22 @@ class SwissEphemerisServer {
     }
     if (windowEndDate <= windowStartDate) {
       throw new McpError(ErrorCode.InvalidParams, 'window_end must be after window_start');
+    }
+
+    const validatedRate = validateRate(rate);
+    const isProgressed = validatedRate === 'secondary_progression';
+    // angle_method/house_frame are SUP-356 concepts - meaningless (and silently ignorable)
+    // at the transit rate, so reject rather than ignore (spec §3).
+    if (!isProgressed && (angle_method !== undefined || house_frame !== undefined)) {
+      throw new McpError(ErrorCode.InvalidParams, 'angle_method and house_frame require rate: "secondary_progression"');
+    }
+    const validatedAngleMethod = isProgressed ? validateAngleMethod(angle_method) : undefined;
+    const validatedHouseFrame = isProgressed ? validateHouseFrame(house_frame) : undefined;
+    // A window starting before birth is arithmetically a CONVERSE progression (birth-ward
+    // rather than forward), a distinct technique this ticket doesn't offer - reject it
+    // rather than silently computing negative elapsed years (spec §3).
+    if (isProgressed && windowStartDate < birthDate) {
+      throw new McpError(ErrorCode.InvalidParams, 'window_start must not precede birth_datetime at rate: "secondary_progression" (that would be a converse progression, not offered yet)');
     }
 
     if (include_minor !== undefined && typeof include_minor !== 'boolean') {
@@ -1508,7 +1683,8 @@ class SwissEphemerisServer {
     const validatedHouseSystem = validateHouseSystem(house_system);
     const validatedEventTypes = validateEventTypes(event_types);
 
-    const requestedTransitingBodies = Array.isArray(bodies) && bodies.length ? [...new Set(bodies)] : DEFAULT_TRANSITING_BODIES;
+    const defaultTransitingBodies = DEFAULT_TRANSITING_BODIES_BY_RATE[validatedRate];
+    const requestedTransitingBodies = Array.isArray(bodies) && bodies.length ? [...new Set(bodies)] : defaultTransitingBodies;
     for (const b of requestedTransitingBodies) {
       if (!EVENT_TRANSITING_BODIES.has(b)) {
         throw new McpError(ErrorCode.InvalidParams, `Unknown transiting body: ${b}`);
@@ -1516,20 +1692,22 @@ class SwissEphemerisServer {
     }
 
     const includeMinor = include_minor ?? false;
-    const includeAngles = include_angles ?? false;
+    const includeAngles = include_angles ?? isProgressed;
     const includeSouthNode = include_south_node ?? false;
     const includeVertex = include_vertex ?? false;
-    const includeQuarterMoons = include_quarter_moons ?? false;
+    const includeQuarterMoons = include_quarter_moons ?? isProgressed;
     const orbOverrides = orb_overrides ?? {};
-    const orbModel = orb_model ?? 'moiety';
+    const orbModel = orb_model ?? (isProgressed ? 'fixed' : 'moiety');
 
-    // Window cap (spec Q9) - clamp rather than reject, but say so (window.truncated)
-    // rather than silently searching a shorter span than what was asked for.
+    // Window cap (spec Q9, rate-keyed by SUP-357/SUP-359 §2/§8) - clamp rather than
+    // reject, but say so (window.truncated) rather than silently searching a shorter span
+    // than what was asked for.
+    const maxWindowDays = MAX_EVENT_WINDOW_DAYS_BY_RATE[validatedRate];
     let effectiveEndDate = windowEndDate;
     let windowTruncated = false;
     const requestedWindowDays = (windowEndDate - windowStartDate) / 86400000;
-    if (requestedWindowDays > MAX_EVENT_WINDOW_DAYS) {
-      effectiveEndDate = new Date(windowStartDate.getTime() + MAX_EVENT_WINDOW_DAYS * 86400000);
+    if (requestedWindowDays > maxWindowDays) {
+      effectiveEndDate = new Date(windowStartDate.getTime() + maxWindowDays * 86400000);
       windowTruncated = true;
     }
 
@@ -1550,9 +1728,17 @@ class SwissEphemerisServer {
 
     const startJd = jdFromDate(windowStartDate);
     const endJd = jdFromDate(effectiveEndDate);
+    const birthJd = jdFromDate(birthDate);
+    const yearLengthDays = TROPICAL_YEAR_DAYS;
+    // 1.0 day of ephemeris time (spec §1.2 - the rule transfers unchanged from the
+    // transit rate because progression is a uniform time dilation), expressed as a
+    // target-time step: at the transit rate that's just 1 day; at the progressed rate a
+    // step of `yearLengthDays` target-days maps back to exactly 1 ephemeris day.
+    const scanStepDays = isProgressed ? yearLengthDays : 1;
 
-    // Natal cusps, resolved once - house_ingress targets and the Whole Sign coincidence
-    // flag (spec Q6) both key off these, never off the house_system code directly.
+    // Natal cusps, resolved once - house_ingress targets (under house_frame "natal", the
+    // only frame the transit rate has) and the Whole Sign coincidence flag (spec Q6) both
+    // key off these, never off the house_system code directly.
     const cusps = [];
     for (let house = 1; house <= 12; house++) {
       const cuspLongitude = natalChart.houses[house].longitude;
@@ -1561,66 +1747,272 @@ class SwissEphemerisServer {
       cusps.push({ house, longitude: cuspLongitude, coincidesWithSignIngress });
     }
 
+    const providerFor = (body) => (isProgressed
+      ? progressedBodyProvider(body, { birthJd, yearLengthDays })
+      : transitProviderFor(body));
+
+    // Progressed Midheaven/Ascendant/moving-cusp machinery (SUP-357/SUP-359 §4) - built
+    // only when needed. mcProvider is pure arithmetic (lib/progressed-provider.js, reusing
+    // the progressed Sun's own speed under solar_arc); the Ascendant and moving cusps need
+    // an actual swetest -house lookup (obliquity + ARMC + the fictitious-longitude trick
+    // computeFictitiousLongitude derives - see calculate_secondary_progressions, which
+    // this mirrors exactly), memoized per whole EPHEMERIS second since calculateEphemeris
+    // truncates to that resolution internally regardless (formatTimeToSwiss reads whole
+    // UTC seconds), so caching at that granularity loses no precision it didn't already
+    // have and collapses the many nearby bisection queries refinement performs into a
+    // handful of actual swetest spawns.
+    let mcProvider = null;
+    let ascProvider = null;
+    let progressedFrameAt = null;
+    if (isProgressed) {
+      const progressedSunProvider = providerFor('Sun');
+      mcProvider = progressedMcProvider({
+        angleMethod: validatedAngleMethod,
+        natalMcLongitude: natalChart.chart_points.Midheaven.longitude,
+        natalSunLongitude: natalChart.planets.Sun.longitude,
+        birthJd, yearLengthDays,
+        sunProvider: progressedSunProvider,
+      });
+
+      const frameCache = new Map();
+      progressedFrameAt = (targetJd) => {
+        const ephJd = ephemerisJdForTarget(targetJd, birthJd, yearLengthDays);
+        const bucketKey = Math.round(ephJd * 86400);
+        if (frameCache.has(bucketKey)) return frameCache.get(bucketKey);
+
+        const progressedDatetimeIso = dateFromJd(ephJd).toISOString();
+        const mcLongitude = mcProvider.positionAt(targetJd).longitude;
+        const progressedRaw = this.calculateEphemeris(progressedDatetimeIso, latitude, longitude, validatedHouseSystem);
+        const fictitiousLongitude = computeFictitiousLongitude({
+          progressedMcLongitude: mcLongitude,
+          obliquityDeg: progressedRaw.obliquity,
+          baseArmc: progressedRaw.chart_points.ARMC.longitude,
+          natalLongitude: longitude,
+        });
+        const progressedFrame = this.calculateEphemeris(progressedDatetimeIso, latitude, fictitiousLongitude, validatedHouseSystem);
+        const frame = { ascendant: progressedFrame.chart_points.Ascendant.longitude, houses: progressedFrame.houses };
+        frameCache.set(bucketKey, frame);
+        return frame;
+      };
+      ascProvider = ascendantProviderFor(progressedFrameAt);
+    }
+
+    // Birth-time sensitivity, quantified (spec §1.3) - progressed mode only. One extra
+    // natal chart at birth + 1 minute yields the degrees-per-birth-minute shift for all
+    // four angles and all twelve cusps at once; `elapsedYears`/arc's own dependence on
+    // birth TIME (as opposed to birth DATE) is negligible (~1 part in 5*10^5), so this
+    // natal-chart shift stands in for the progressed angles' shift too rather than needing
+    // a second progressed-frame computation.
+    const angleShiftPerMinute = {};
+    const cuspShiftPerMinute = {};
+    if (isProgressed) {
+      const shiftedBirthDate = new Date(birthDate.getTime() + 60000);
+      const shiftedChart = this.calculateEphemeris(shiftedBirthDate.toISOString(), latitude, longitude, validatedHouseSystem);
+      for (const name of BIRTH_TIME_SENSITIVE_TARGETS) {
+        const before = resolveChartPoint(natalChart, name);
+        const after = resolveChartPoint(shiftedChart, name);
+        if (before && after) angleShiftPerMinute[name] = Math.abs(wrap180(after.longitude - before.longitude));
+      }
+      for (let house = 1; house <= 12; house++) {
+        cuspShiftPerMinute[house] = Math.abs(wrap180(shiftedChart.houses[house].longitude - natalChart.houses[house].longitude));
+      }
+    }
+
     const contacts = [];
     const events = [];
 
-    // Lunations are transiting-to-transiting (Sun-Moon) and don't depend on the
-    // per-transiting-body loop below, so their scan is skipped entirely when excluded.
-    const needsBodyScan = validatedEventTypes.some((t) => t !== 'lunation');
+    // Shared aspect-episode builder for both real moving bodies and (progressed-mode only)
+    // the Ascendant/Midheaven pseudo-sources below - same output shape either way,
+    // `settings_used.rate` is what tells a caller which one produced a given row (spec §5:
+    // one `transiting_body` key, not a per-mode rename, so no consumer has to branch).
+    const buildAspectContacts = (bodyName, provider, segments, stations) => {
+      const rows = [];
+      for (const target of natalTargets) {
+        for (const [aspectName, aspectAngle] of Object.entries(aspectDefs)) {
+          const orbAllowed = orbAllowedFor(aspectSettings, bodyName, target.name, aspectName);
+          const category = Object.hasOwn(MAJOR_ASPECTS, aspectName) ? 'major' : 'minor';
+
+          // A square/sextile/trine (and their minor-aspect equivalents) has TWO target
+          // longitudes 180deg apart - natal+angle and natal-angle - that are equally
+          // "square"/"sextile"/"trine"; conjunction (0) and opposition (180) are the
+          // only angles where those coincide. findContacts searches one fixed target
+          // per call, so both must be searched for every other angle or a fast body
+          // (e.g. Mars, which can reach both sides within a single-year window) would
+          // silently lose whichever side isn't natal+angle. `aspect_angle` on the
+          // output always reports the canonical dict value (e.g. 90 for square), never
+          // 270, matching how calculate_aspects/calculate_transits label both sides.
+          const searchAngles = (aspectAngle === 0 || aspectAngle === 180)
+            ? [aspectAngle]
+            : [aspectAngle, 360 - aspectAngle];
+
+          for (const searchAngle of searchAngles) {
+            for (const contact of findContacts({
+              provider, segments, stations,
+              natalLongitude: target.longitude, aspectAngle: searchAngle, orbAllowed,
+              startJd, endJd,
+            })) {
+              const targetSensitive = BIRTH_TIME_SENSITIVE_TARGETS.has(target.name);
+              const bodySensitive = ANGLE_SOURCE_NAMES.has(bodyName);
+              const row = {
+                transiting_body: bodyName,
+                natal_point: target.name,
+                aspect: aspectName,
+                category,
+                aspect_angle: aspectAngle,
+                orb_allowed: contact.orb_allowed,
+                enters_orb: contact.enters_orb,
+                leaves_orb: contact.leaves_orb,
+                passes: contact.passes.map(({ jd, ...pass }) => pass),
+                closest_approach: contact.closest_approach,
+                birth_time_sensitive: targetSensitive || bodySensitive,
+                enters_orb_truncated: contact.enters_orb_truncated,
+                leaves_orb_truncated: contact.leaves_orb_truncated,
+              };
+              if (isProgressed && (targetSensitive || bodySensitive)) {
+                const shiftDeg = (targetSensitive ? (angleShiftPerMinute[target.name] ?? 0) : 0)
+                  + (bodySensitive ? (angleShiftPerMinute[bodyName] ?? 0) : 0);
+                // Evaluated AT THE CONTACT, not at window start or some fixed reference -
+                // the spec's own formula says "relative rate at the contact", and for a
+                // point like the progressed Ascendant that matters: its rate is far from
+                // constant across a lifetime (2.4 deg/yr near birth, ~1.1 deg/yr by age
+                // 32.5 for DAY_CHART - unlike the Sun/Midheaven, whose progressed rate
+                // barely moves), so a single per-body reference would misstate it for
+                // most of the search window.
+                const contactRate = Math.abs(provider.positionAt(jdFromDate(new Date(contact.closest_approach.datetime))).speed);
+                if (shiftDeg > 0 && contactRate > RATE_EPSILON) row.date_uncertainty_days_per_birth_minute = shiftDeg / contactRate;
+              }
+              rows.push(row);
+            }
+          }
+        }
+      }
+      return rows;
+    };
+
+    // Station search (spec ruling #4/§8): at the transit rate, unchanged - only bodies
+    // both requested and station-capable. At the progressed rate, independent of `bodies`
+    // entirely - a body stations at most 0-2 times per lifetime by progression, so volume
+    // is a non-issue, and this is what lets the narrowed progressed moving-set default
+    // (Sun/Moon/Mercury/Venus/Mars) coexist with real outer-planet progressed stations
+    // (Jupiter, Pluto - see spec §6.2) without a schema change.
+    const stationBodies = isProgressed
+      ? STATION_CAPABLE_BODIES
+      : new Set(requestedTransitingBodies.filter((b) => STATION_CAPABLE_BODIES.has(b)));
+    const needsStations = validatedEventTypes.includes('station');
+    const allScanBodies = needsStations
+      ? [...new Set([...requestedTransitingBodies, ...stationBodies])]
+      : requestedTransitingBodies;
+
+    // Lunations are Sun-Moon relative and don't depend on the per-body loop below, so
+    // their scan is skipped entirely when both are excluded from event_types. Likewise the
+    // per-body coarse scan itself (segments/stations) is only needed for aspect/ingress -
+    // a station-only search has no use for it (findStations below re-scans on its own),
+    // so skipping it here matters more than it did pre-SUP-359: station search is now
+    // independent of `bodies` and can cover many more bodies than were actually requested.
+    const needsMovingSideScan = validatedEventTypes.includes('aspect')
+      || validatedEventTypes.includes('sign_ingress')
+      || validatedEventTypes.includes('house_ingress');
+    const needsBodyScan = needsMovingSideScan || needsStations;
 
     if (needsBodyScan) {
-      for (const body of requestedTransitingBodies) {
-        const provider = transitProviderFor(body);
-        const { segments, stations } = scanTransitingBody(provider, startJd, endJd, 1);
+      for (const body of allScanBodies) {
+        const provider = providerFor(body);
+        const isRequested = needsMovingSideScan && requestedTransitingBodies.includes(body);
 
-        if (validatedEventTypes.includes('aspect')) {
-          for (const target of natalTargets) {
-            for (const [aspectName, aspectAngle] of Object.entries(aspectDefs)) {
-              const orbAllowed = orbAllowedFor(aspectSettings, body, target.name, aspectName);
-              const category = Object.hasOwn(MAJOR_ASPECTS, aspectName) ? 'major' : 'minor';
+        if (isRequested) {
+          const { segments, stations } = scanTransitingBody(provider, startJd, endJd, scanStepDays);
 
-              // A square/sextile/trine (and their minor-aspect equivalents) has TWO target
-              // longitudes 180deg apart - natal+angle and natal-angle - that are equally
-              // "square"/"sextile"/"trine"; conjunction (0) and opposition (180) are the
-              // only angles where those coincide. findContacts searches one fixed target
-              // per call, so both must be searched for every other angle or a fast body
-              // (e.g. Mars, which can reach both sides within a single-year window) would
-              // silently lose whichever side isn't natal+angle. `aspect_angle` on the
-              // output always reports the canonical dict value (e.g. 90 for square), never
-              // 270, matching how calculate_aspects/calculate_transits label both sides.
-              const searchAngles = (aspectAngle === 0 || aspectAngle === 180)
-                ? [aspectAngle]
-                : [aspectAngle, 360 - aspectAngle];
+          if (validatedEventTypes.includes('aspect')) {
+            contacts.push(...buildAspectContacts(body, provider, segments, stations));
+          }
 
-              for (const searchAngle of searchAngles) {
-                for (const contact of findContacts({
-                  provider, segments, stations,
-                  natalLongitude: target.longitude, aspectAngle: searchAngle, orbAllowed,
-                  startJd, endJd,
-                })) {
-                  contacts.push({
-                    transiting_body: body,
-                    natal_point: target.name,
-                    aspect: aspectName,
-                    category,
-                    aspect_angle: aspectAngle,
-                    orb_allowed: contact.orb_allowed,
-                    enters_orb: contact.enters_orb,
-                    leaves_orb: contact.leaves_orb,
-                    passes: contact.passes.map(({ jd, ...pass }) => pass),
-                    closest_approach: contact.closest_approach,
-                    birth_time_sensitive: BIRTH_TIME_SENSITIVE_TARGETS.has(target.name),
-                    enters_orb_truncated: contact.enters_orb_truncated,
-                    leaves_orb_truncated: contact.leaves_orb_truncated,
-                  });
+          if (validatedEventTypes.includes('sign_ingress')) {
+            for (let k = 0; k < 12; k++) {
+              for (const crossing of findCrossings(provider, segments, k * 30)) {
+                const direct = !crossing.retrograde;
+                const nudge = direct ? INGRESS_EPSILON_DEG : -INGRESS_EPSILON_DEG;
+                events.push({
+                  type: 'sign_ingress',
+                  datetime: crossing.datetime,
+                  body,
+                  direction: direct ? 'direct' : 'retrograde',
+                  from_sign: EVENT_SIGNS[signIndexForLongitude(crossing.longitude - nudge)],
+                  to_sign: EVENT_SIGNS[signIndexForLongitude(crossing.longitude + nudge)],
+                  longitude: crossing.longitude,
+                });
+              }
+            }
+          }
+
+          if (validatedEventTypes.includes('house_ingress')) {
+            if (!isProgressed || validatedHouseFrame === 'natal') {
+              // Fixed natal cusps - same search either way; house_ingress is birth-time
+              // derived in both modes (spec §1.3/§8 retrofit item 5 - natal cusps are as
+              // birth-time-sensitive as the Ascendant, a gap that existed in transit mode
+              // too), so the boolean is unconditional and the quantified figure is added
+              // only where it's required (progressed mode).
+              for (const cusp of cusps) {
+                for (const crossing of findCrossings(provider, segments, cusp.longitude)) {
+                  const direct = !crossing.retrograde;
+                  const nudge = direct ? INGRESS_EPSILON_DEG : -INGRESS_EPSILON_DEG;
+                  const event = {
+                    type: 'house_ingress',
+                    datetime: crossing.datetime,
+                    body,
+                    direction: direct ? 'direct' : 'retrograde',
+                    from_house: findHouseForLongitude(crossing.longitude - nudge, natalChart.houses),
+                    to_house: findHouseForLongitude(crossing.longitude + nudge, natalChart.houses),
+                    cusp_longitude: cusp.longitude,
+                    house_system: validatedHouseSystem,
+                    coincides_with_sign_ingress: cusp.coincidesWithSignIngress,
+                    birth_time_sensitive: true,
+                  };
+                  if (isProgressed) {
+                    const eventRate = Math.abs(crossing.speed);
+                    if (eventRate > RATE_EPSILON) event.date_uncertainty_days_per_birth_minute = cuspShiftPerMinute[cusp.house] / eventRate;
+                  }
+                  events.push(event);
+                }
+              }
+            } else {
+              // house_frame: "progressed" - the cusps move too (spec §1.1.1): a relative
+              // provider over body(t) - cusp_i(t), segmented at ITS OWN stationary points,
+              // so `direction` reflects the relative rate's sign rather than the body's own.
+              for (let house = 1; house <= 12; house++) {
+                const cuspProvider = cuspProviderFor(progressedFrameAt, house);
+                const relative = relativeMovingProvider(provider, cuspProvider);
+                const { segments: relativeSegments } = scanTransitingBody(relative, startJd, endJd, scanStepDays);
+
+                for (const crossing of findCrossings(relative, relativeSegments, 0)) {
+                  const direct = !crossing.retrograde;
+                  const nudge = direct ? INGRESS_EPSILON_DEG : -INGRESS_EPSILON_DEG;
+                  const bodyLongitude = provider.positionAt(crossing.jd).longitude;
+                  const housesAtCrossing = progressedFrameAt(crossing.jd).houses;
+                  const cuspLongitude = cuspProvider.positionAt(crossing.jd).longitude;
+                  const nearestSignBoundary = Math.round(cuspLongitude / 30) * 30;
+                  const eventRate = Math.abs(crossing.speed);
+                  const event = {
+                    type: 'house_ingress',
+                    datetime: crossing.datetime,
+                    body,
+                    direction: direct ? 'direct' : 'retrograde',
+                    from_house: findHouseForLongitude(bodyLongitude - nudge, housesAtCrossing),
+                    to_house: findHouseForLongitude(bodyLongitude + nudge, housesAtCrossing),
+                    cusp_longitude: cuspLongitude,
+                    house_system: validatedHouseSystem,
+                    coincides_with_sign_ingress: Math.abs(wrap180(cuspLongitude - nearestSignBoundary)) < 1 / 3600,
+                    birth_time_sensitive: true,
+                  };
+                  if (eventRate > RATE_EPSILON) event.date_uncertainty_days_per_birth_minute = cuspShiftPerMinute[house] / eventRate;
+                  events.push(event);
                 }
               }
             }
           }
         }
 
-        if (validatedEventTypes.includes('station') && STATION_CAPABLE_BODIES.has(body)) {
-          for (const { jd, ...station } of findStations(provider, startJd, endJd, 1)) {
+        if (needsStations && stationBodies.has(body)) {
+          for (const { jd, ...station } of findStations(provider, startJd, endJd, scanStepDays)) {
             events.push({
               ...station,
               body,
@@ -1628,56 +2020,38 @@ class SwissEphemerisServer {
             });
           }
         }
+      }
+    }
 
-        if (validatedEventTypes.includes('sign_ingress')) {
-          for (let k = 0; k < 12; k++) {
-            for (const crossing of findCrossings(provider, segments, k * 30)) {
-              const direct = !crossing.retrograde;
-              const nudge = direct ? INGRESS_EPSILON_DEG : -INGRESS_EPSILON_DEG;
-              events.push({
-                type: 'sign_ingress',
-                datetime: crossing.datetime,
-                body,
-                direction: direct ? 'direct' : 'retrograde',
-                from_sign: EVENT_SIGNS[signIndexForLongitude(crossing.longitude - nudge)],
-                to_sign: EVENT_SIGNS[signIndexForLongitude(crossing.longitude + nudge)],
-                longitude: crossing.longitude,
-              });
-            }
-          }
-        }
-
-        if (validatedEventTypes.includes('house_ingress')) {
-          for (const cusp of cusps) {
-            for (const crossing of findCrossings(provider, segments, cusp.longitude)) {
-              const direct = !crossing.retrograde;
-              const nudge = direct ? INGRESS_EPSILON_DEG : -INGRESS_EPSILON_DEG;
-              events.push({
-                type: 'house_ingress',
-                datetime: crossing.datetime,
-                body,
-                direction: direct ? 'direct' : 'retrograde',
-                from_house: findHouseForLongitude(crossing.longitude - nudge, natalChart.houses),
-                to_house: findHouseForLongitude(crossing.longitude + nudge, natalChart.houses),
-                cusp_longitude: cusp.longitude,
-                house_system: validatedHouseSystem,
-                coincides_with_sign_ingress: cusp.coincidesWithSignIngress,
-              });
-            }
-          }
-        }
+    // Progressed Ascendant/Midheaven as moving-side aspect sources (spec §1.3/§4): the
+    // headline output at this rate, matching calculate_secondary_progressions'
+    // aspects_to_natal asymmetry exactly - never sources for station/ingress (they're not
+    // real bodies to begin with), and progressed Part of Fortune is never a source either
+    // (which day/night formula applies to a progressed sect is unsettled).
+    if (isProgressed && includeAngles && validatedEventTypes.includes('aspect')) {
+      for (const name of ANGLE_SOURCE_NAMES) {
+        const provider = name === 'Midheaven' ? mcProvider : ascProvider;
+        const { segments, stations } = scanTransitingBody(provider, startJd, endJd, scanStepDays);
+        contacts.push(...buildAspectContacts(name, provider, segments, stations));
       }
     }
 
     if (validatedEventTypes.includes('lunation')) {
-      const sunProvider = transitProviderFor('Sun');
-      const moonProvider = transitProviderFor('Moon');
-      const solarEclipses = eclipsesFor('solar', startJd, endJd);
-      const lunarEclipses = eclipsesFor('lunar', startJd, endJd);
-      const lunations = annotateEclipses(
-        findLunations({ sunProvider, moonProvider, startJd, endJd, includeQuarterMoons, stepDays: 1 }),
-        { solarEclipses, lunarEclipses }
-      );
+      const sunProvider = providerFor('Sun');
+      const moonProvider = providerFor('Moon');
+      const rawLunations = findLunations({ sunProvider, moonProvider, startJd, endJd, includeQuarterMoons, stepDays: scanStepDays });
+      // Eclipse annotation is routed off entirely at the progressed rate, not called and
+      // discarded (spec §1.1): eclipsesFor would still spawn a real solar/lunar eclipse
+      // search for whatever near-term calendar window the progressed instants happen to
+      // fall in, and annotateEclipses' tolerance-based matching could silently attach one
+      // of those real eclipses to an unrelated progressed syzygy. No progressed lunation
+      // may ever carry an `eclipse` key - structurally absent, not just unpopulated.
+      const lunations = isProgressed
+        ? rawLunations
+        : annotateEclipses(rawLunations, {
+          solarEclipses: eclipsesFor('solar', startJd, endJd),
+          lunarEclipses: eclipsesFor('lunar', startJd, endJd),
+        });
 
       for (const { jd, ...lunation } of lunations) {
         events.push({
@@ -1700,6 +2074,7 @@ class SwissEphemerisServer {
       events,
       settings_used: {
         event_types: validatedEventTypes,
+        rate: validatedRate,
         bodies: requestedTransitingBodies,
         targets: requestedTargets,
         house_system: validatedHouseSystem,
@@ -1711,6 +2086,11 @@ class SwissEphemerisServer {
         include_vertex: includeVertex,
         include_quarter_moons: includeQuarterMoons,
         node_type: 'true',
+        ...(isProgressed ? {
+          angle_method_used: validatedAngleMethod,
+          house_frame_used: validatedHouseFrame,
+          year_length_days: yearLengthDays,
+        } : {}),
       },
     };
   }
