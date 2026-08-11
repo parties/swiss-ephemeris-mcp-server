@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SwissEphemerisServer } from '../index.js';
+import { jdFromDate } from '../lib/ephemeris-series.js';
+import { progressedBodyProvider, progressedMcProvider } from '../lib/progressed-provider.js';
 import { TROPICAL_YEAR_DAYS } from '../lib/progressions.js';
 import { DAY_CHART, SOUTHERN_CHART } from './fixtures/charts.js';
 import { resolveEphePath, swetestAvailable } from './fixtures/ephe-path.js';
@@ -23,9 +25,29 @@ function pairName(row) {
   return [row.body_a, row.body_b].sort().join('-');
 }
 
+function findEpisodeNear(contacts, key, aspect, entersOrbIso, toleranceSec = 2) {
+  return contacts.find((c) => pairName(c) === key && c.aspect === aspect
+    && Math.abs(new Date(c.enters_orb).getTime() - new Date(entersOrbIso).getTime()) / 1000 <= toleranceSec);
+}
+
+// Undirected aspect -> lunation phase (SUP-360's eight-phase scheme, LUNATION_PHASE_ANGLES
+// in lib/event-search.js). Several phases share one aspect name because an aspect row is
+// undirected and cannot distinguish waxing from waning (spec §6.2) - crescent/balsamic both
+// read as semisquare, gibbous/disseminating both read as sesquiquadrate.
+const PHASE_TO_ASPECT = {
+  new: 'conjunction',
+  crescent: 'semisquare',
+  first_quarter: 'square',
+  gibbous: 'sesquiquadrate',
+  full: 'opposition',
+  disseminating: 'sesquiquadrate',
+  last_quarter: 'square',
+  balsamic: 'semisquare',
+};
+
 // --- §9.1 The lunation identity - the headline test --------------------------------------
 
-test('§9.1 pair_contacts (Sun, Moon) majors reproduce every quarters lunation datetime to the second, and episodes/passes are two different numbers (26/25)', { skip: !HAS_SWETEST }, async () => {
+test('§9.1 pair_contacts (Sun, Moon) majors reproduce every quarters lunation datetime to the second with the correct aspect mapping, 25 episodes / 25 passes', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
   const window = {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -43,30 +65,39 @@ test('§9.1 pair_contacts (Sun, Moon) majors reproduce every quarters lunation d
   assert.equal(pairs.pair_contacts.length > 0, true);
   assert.ok(pairs.pair_contacts.every((c) => pairName(c) === 'Moon-Sun'));
 
-  const PHASE_TO_ASPECT = { new: 'conjunction', first_quarter: 'square', full: 'opposition', last_quarter: 'square' };
-  const pairDatetimes = new Set();
+  const pairAspectByDatetime = new Map();
   for (const c of pairs.pair_contacts) {
-    for (const p of c.passes) pairDatetimes.add(p.datetime);
+    for (const p of c.passes) pairAspectByDatetime.set(p.datetime, c.aspect);
   }
 
   assert.equal(lunations.events.length, 12, 'expected 12 quarters lunation events in this 90yr window');
   for (const lunation of lunations.events) {
-    assert.ok(pairDatetimes.has(lunation.datetime), `expected pair_contacts to reproduce ${lunation.phase}@${lunation.datetime}`);
+    assert.ok(pairAspectByDatetime.has(lunation.datetime), `expected pair_contacts to reproduce ${lunation.phase}@${lunation.datetime}`);
+    assert.equal(
+      pairAspectByDatetime.get(lunation.datetime), PHASE_TO_ASPECT[lunation.phase],
+      `expected ${lunation.phase} to map to ${PHASE_TO_ASPECT[lunation.phase]}, got ${pairAspectByDatetime.get(lunation.datetime)}`
+    );
   }
 
-  // §6.2: majors over 90yr are 26 orb episodes / 25 exact passes - the 26th episode (a
-  // square that enters orb near the window edge and never perfects) inflates the episode
-  // count without adding a pass, so the two must be asserted as different numbers or an
-  // implementation that silently drops the no-pass episode would still pass.
+  // Declared spec departure: SUP-361 §9.1 claims 26 orb episodes / 25 exact passes, with a
+  // 26th episode entering orb 2079-11-19 at closest_approach.orb 11.9918deg. That figure is
+  // wrong: 11.9918 is the progressed Sun-Moon RELATIVE RATE in deg/yr (not an orb) recorded
+  // into the closest_approach.orb slot, it violates the 1deg fixed major-orb model (11.99deg
+  // is 12x the allowed orb - no row can be emitted at all), and it contradicts the spec's
+  // own §9.2 total (109 = 27+26+25+25 requires Moon-Sun at 25, not 26). Measured directly
+  // against this implementation (bb9fb07, DAY_CHART, 1990-01-01T12:00Z to 2080-01-01,
+  // Sun-Moon majors): 25 orb episodes, 25 exact passes, every episode fully perfected
+  // (enters_orb_truncated=false, leaves_orb_truncated=false on all 25), nothing touches the
+  // window past the last leave-orb at 2078-09-19T02:58:01Z. The truncated-no-pass guard this
+  // assertion originally wanted is real but belongs to §9.4 (Mercury-Venus, 2 episodes / 1
+  // pass, leaves_orb_truncated) below, which already exercises it.
   const majorEpisodes = pairs.pair_contacts.filter((c) => c.category === 'major');
-  assert.equal(majorEpisodes.length, 26);
+  assert.equal(majorEpisodes.length, 25);
   assert.equal(passCount(majorEpisodes), 25);
-  const truncatedNoPass = majorEpisodes.filter((c) => c.passes.length === 0);
-  assert.equal(truncatedNoPass.length, 1);
-  assert.equal(truncatedNoPass[0].leaves_orb_truncated, true);
+  assert.ok(majorEpisodes.every((c) => !c.enters_orb_truncated && !c.leaves_orb_truncated));
 });
 
-test('§9.1/§6.1 eight_phase identity: all 24 phase datetimes reproduced to the second by pair_contacts with include_minor', { skip: !HAS_SWETEST }, async () => {
+test('§9.1/§6.1 eight_phase identity: all 24 phase datetimes and aspect mappings reproduced to the second by pair_contacts with include_minor', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
   const window = {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -83,18 +114,22 @@ test('§9.1/§6.1 eight_phase identity: all 24 phase datetimes reproduced to the
 
   assert.equal(lunations.events.length, 24);
 
-  const pairDatetimes = new Set();
+  const pairAspectByDatetime = new Map();
   for (const c of pairs.pair_contacts) {
-    for (const p of c.passes) pairDatetimes.add(p.datetime);
+    for (const p of c.passes) pairAspectByDatetime.set(p.datetime, c.aspect);
   }
   for (const lunation of lunations.events) {
-    assert.ok(pairDatetimes.has(lunation.datetime), `expected pair_contacts (with include_minor) to reproduce ${lunation.phase}@${lunation.datetime}`);
+    assert.ok(pairAspectByDatetime.has(lunation.datetime), `expected pair_contacts (with include_minor) to reproduce ${lunation.phase}@${lunation.datetime}`);
+    assert.equal(
+      pairAspectByDatetime.get(lunation.datetime), PHASE_TO_ASPECT[lunation.phase],
+      `expected ${lunation.phase} to map to ${PHASE_TO_ASPECT[lunation.phase]}, got ${pairAspectByDatetime.get(lunation.datetime)}`
+    );
   }
 });
 
 // --- §9.2 Default progressed pair set counts ----------------------------------------------
 
-test('§9.2 default progressed pair_bodies (10 pairs) over 90yr: per-pair major-episode counts', { skip: !HAS_SWETEST }, async () => {
+test('§9.2 default progressed pair_bodies (10 pairs) over 90yr: per-pair episode/pass counts', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
   const result = await server.handleToolCall('find_events', {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -108,16 +143,36 @@ test('§9.2 default progressed pair_bodies (10 pairs) over 90yr: per-pair major-
   const byPair = {};
   for (const c of result.pair_contacts) {
     const key = pairName(c);
-    byPair[key] = (byPair[key] || 0) + 1;
+    if (!byPair[key]) byPair[key] = { episodes: 0, passes: 0 };
+    byPair[key].episodes += 1;
+    byPair[key].passes += c.passes.length;
   }
+
+  // Exact per-pair table from SUP-361 §9.2, measured against this implementation (bb9fb07).
+  const expected = {
+    'Moon-Venus': { episodes: 27, passes: 27 },
+    'Mars-Moon': { episodes: 26, passes: 26 },
+    'Moon-Sun': { episodes: 25, passes: 25 },
+    'Mercury-Moon': { episodes: 25, passes: 25 },
+    'Mercury-Sun': { episodes: 2, passes: 2 },
+    'Mercury-Venus': { episodes: 2, passes: 1 },
+    'Sun-Venus': { episodes: 1, passes: 1 },
+    'Mars-Mercury': { episodes: 1, passes: 1 },
+  };
+  for (const [key, counts] of Object.entries(expected)) {
+    assert.deepEqual(byPair[key], counts, `expected ${key} episodes/passes to match §9.2`);
+  }
+  assert.equal(byPair['Mars-Sun'], undefined, 'Sun-Mars has zero major episodes (§9.3)');
+  assert.equal(byPair['Mars-Venus'], undefined, 'Venus-Mars has zero major episodes (§9.3)');
 
   const totalEpisodes = result.pair_contacts.length;
   const totalPasses = passCount(result.pair_contacts);
-  assert.ok(totalEpisodes > 0 && totalPasses > 0, 'expected a nonempty default progressed pair search');
+  assert.equal(totalEpisodes, 109);
+  assert.equal(totalPasses, 108);
 
   const moonPairs = ['Moon-Sun', 'Mercury-Moon', 'Moon-Venus', 'Mars-Moon'];
-  const moonEpisodes = moonPairs.reduce((sum, key) => sum + (byPair[key] || 0), 0);
-  assert.ok(moonEpisodes > totalEpisodes * 0.8, 'expected the four Moon pairs to dominate the default progressed pair output');
+  const moonEpisodes = moonPairs.reduce((sum, key) => sum + (byPair[key]?.episodes || 0), 0);
+  assert.equal(moonEpisodes, 103, 'expected the four Moon pairs to sum to 103 of the 109 total episodes');
 });
 
 // --- §9.3 Empty is a correct answer ---------------------------------------------------------
@@ -135,8 +190,25 @@ test('§9.3 Sun-Mars and Venus-Mars: zero major-aspect episodes over 90yr; nonze
   assert.deepEqual(majors.pair_contacts.filter((c) => pairName(c) === 'Mars-Venus'), []);
 
   const minors = await server.handleToolCall('find_events', { ...window, pair_bodies: ['Sun', 'Venus', 'Mars'], include_minor: true });
-  assert.ok(minors.pair_contacts.some((c) => pairName(c) === 'Mars-Sun'), 'expected Sun-Mars minor aspects to appear with include_minor');
-  assert.ok(minors.pair_contacts.some((c) => pairName(c) === 'Mars-Venus'), 'expected Venus-Mars minor aspects to appear with include_minor');
+
+  // Exact table from SUP-361 §9.3, measured against this implementation (bb9fb07).
+  const sunMars = findEpisodeNear(minors.pair_contacts, 'Mars-Sun', 'semisquare', '2035-09-29T11:59:57Z');
+  assert.ok(sunMars, 'expected Sun-Mars semisquare episode with include_minor');
+  assertCloseIso(sunMars.enters_orb, '2035-09-29T11:59:57Z');
+  assertCloseIso(sunMars.passes[0].datetime, '2037-07-14T04:39:52Z');
+  assertCloseIso(sunMars.leaves_orb, '2039-05-02T13:29:39Z');
+
+  const venusMarsSemisquare = findEpisodeNear(minors.pair_contacts, 'Mars-Venus', 'semisquare', '2000-04-14T03:35:03Z');
+  assert.ok(venusMarsSemisquare, 'expected Venus-Mars semisquare episode with include_minor');
+  assertCloseIso(venusMarsSemisquare.enters_orb, '2000-04-14T03:35:03Z');
+  assertCloseIso(venusMarsSemisquare.passes[0].datetime, '2000-09-09T08:29:31Z');
+  assertCloseIso(venusMarsSemisquare.leaves_orb, '2001-02-03T06:38:02Z');
+
+  const venusMarsSemisextile = findEpisodeNear(minors.pair_contacts, 'Mars-Venus', 'semisextile', '2011-10-18T03:21:29Z');
+  assert.ok(venusMarsSemisextile, 'expected Venus-Mars semisextile episode with include_minor');
+  assertCloseIso(venusMarsSemisextile.enters_orb, '2011-10-18T03:21:29Z');
+  assertCloseIso(venusMarsSemisextile.passes[0].datetime, '2012-03-08T06:04:56Z');
+  assertCloseIso(venusMarsSemisextile.leaves_orb, '2012-07-29T05:14:24Z');
 });
 
 // --- §9.4 An episode with no pass, and a truncated one --------------------------------------
@@ -154,19 +226,26 @@ test('§9.4 Mercury-Venus majors over 90yr: 2 episodes, 1 pass; the second is tr
   assert.equal(mercuryVenus.length, 2);
   assert.equal(passCount(mercuryVenus), 1);
 
-  const truncated = mercuryVenus.find((c) => c.passes.length === 0);
-  assert.ok(truncated);
-  assert.equal(truncated.leaves_orb_truncated, true);
-  assert.ok(truncated.closest_approach.orb < 0.2);
-
   const perfected = mercuryVenus.find((c) => c.passes.length === 1);
   assert.ok(perfected);
   assert.equal(perfected.aspect, 'conjunction');
+  assertCloseIso(perfected.enters_orb, '2023-10-13T11:47:24Z');
+  assertCloseIso(perfected.passes[0].datetime, '2024-07-19T03:04:39Z');
+  assertCloseIso(perfected.leaves_orb, '2025-04-26T04:25:49Z');
+
+  const truncated = mercuryVenus.find((c) => c.passes.length === 0);
+  assert.ok(truncated);
+  assert.equal(truncated.leaves_orb_truncated, true);
+  assertCloseIso(truncated.enters_orb, '2079-01-23T03:09:55Z');
+  assert.ok(
+    Math.abs(truncated.closest_approach.orb - 0.1523) < 1e-3,
+    `expected closest_approach.orb ~0.1523, got ${truncated.closest_approach.orb}`
+  );
 });
 
 // --- §9.5 Structural rules -------------------------------------------------------------------
 
-test('§9.5 (Sun, Midheaven) never appears even when explicitly requested, at either angle_method', { skip: !HAS_SWETEST }, async () => {
+test('§9.5 (Sun, Midheaven) never appears even when explicitly requested, at either angle_method; the solar_arc invariant holds', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
   for (const angle_method of ['solar_arc', 'naibod']) {
     const result = await server.handleToolCall('find_events', {
@@ -177,6 +256,36 @@ test('§9.5 (Sun, Midheaven) never appears even when explicitly requested, at ei
     });
     assert.deepEqual(result.pair_contacts, []);
     assert.deepEqual(result.settings_used.pairs_searched, []);
+  }
+
+  // §4.2/§9.5: assert the underlying invariant directly, not just the exclusion. Under
+  // solar_arc, MC(t) = natalMC + (pSun(t) - natalSun) by construction (progressedMcProvider,
+  // lib/progressed-provider.js) - so lambda(pSun) - lambda(pMC) = natalSun - natalMC for
+  // every t, a true mathematical constant. Exercised directly on the pure providers the pair
+  // path composes (not through calculate_secondary_progressions' swetest house-cusp
+  // roundtrip, which is only approximately equal to this analytic value) so the 1e-9
+  // tolerance the spec asks for is meaningful rather than swetest noise.
+  const birthJd = jdFromDate(new Date(DAY_CHART.datetime));
+  const natalChart = server.calculateEphemeris(DAY_CHART.datetime, DAY_CHART.latitude, DAY_CHART.longitude, 'P');
+  const sunProvider = progressedBodyProvider('Sun', { birthJd, yearLengthDays: Y });
+  const mcProvider = progressedMcProvider({
+    angleMethod: 'solar_arc',
+    natalMcLongitude: natalChart.chart_points.Midheaven.longitude,
+    natalSunLongitude: natalChart.planets.Sun.longitude,
+    birthJd, yearLengthDays: Y, sunProvider,
+  });
+
+  const sampleJds = [birthJd, birthJd + 10 * Y, birthJd + 50 * Y, birthJd + 89 * Y];
+  const diffs = sampleJds.map((jd) => {
+    const sunLon = sunProvider.positionAt(jd).longitude;
+    const mcLon = mcProvider.positionAt(jd).longitude;
+    return ((sunLon - mcLon) % 360 + 360) % 360;
+  });
+  for (let i = 1; i < diffs.length; i++) {
+    assert.ok(
+      Math.abs(diffs[i] - diffs[0]) < 1e-9,
+      `expected lambda(pSun)-lambda(pMC) constant across the window, got ${diffs[0]} vs ${diffs[i]}`
+    );
   }
 });
 
