@@ -777,7 +777,7 @@ class SwissEphemerisServer {
                 bodies: {
                   type: 'array',
                   items: { type: 'string' },
-                  description: 'MOVING side. Default depends on `rate`. At "transit" (default): Mars, Jupiter, Saturn, Uranus, Neptune, Pluto, Chiron - the bodies slow enough to define forecasting "chapters" rather than trigger them; the transiting Moon is excluded (it alone is 21.7x the rest of the output) but reachable by explicit request, as are Sun/Mercury/Venus/asteroids/Lilith/North Node. At "secondary_progression": Sun, Moon, Mercury, Venus, Mars - inverted, since the progressed Moon (13.29 deg/yr) IS the technique and an outer planet moves only a few degrees in a lifetime; the rest are still reachable by explicit request. Angle bodies and Vertex can never appear here - progressed Ascendant/Midheaven are reached via `include_angles` instead, not `bodies`. Governs `contacts[]` and `sign_ingress`/`house_ingress` events; `station` events always search the fixed 13-body station-capable set regardless of this parameter (unaffected by either default) - see `events[].type === "station"`.',
+                  description: 'MOVING side. Default depends on `rate`. At "transit" (default): Mars, Jupiter, Saturn, Uranus, Neptune, Pluto, Chiron - the bodies slow enough to define forecasting "chapters" rather than trigger them; the transiting Moon is excluded (it alone is 21.7x the rest of the output) but reachable by explicit request, as are Sun/Mercury/Venus/asteroids/Lilith/North Node. At "secondary_progression": Sun, Moon, Mercury, Venus, Mars - inverted, since the progressed Moon (13.29 deg/yr) IS the technique and an outer planet moves only a few degrees in a lifetime; the rest are still reachable by explicit request. Angle bodies and Vertex can never appear here - progressed Ascendant/Midheaven are reached via `include_angles` instead, not `bodies`. Governs `contacts[]` and `sign_ingress`/`house_ingress` events; `station` events at rate "secondary_progression" always search the fixed 13-body station-capable set regardless of this parameter, but at rate "transit" stay narrowed to bodies also in that set, unchanged from before this rate parameter existed - see `events[].type === "station"`.',
                 },
                 targets: {
                   type: 'array',
@@ -2634,7 +2634,7 @@ class SwissEphemerisServer {
   }
 }
 
-export { SwissEphemerisServer };
+export { SwissEphemerisServer, adaptiveJdGrid };
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const server = new SwissEphemerisServer();

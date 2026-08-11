@@ -306,6 +306,21 @@ test('§4.5 Neptune/Saturn stations over 730 days match the spec, negative-body 
   assert.ok(!result.events.some((e) => e.type === 'station' && ['Sun', 'Moon', 'Lilith'].includes(e.body)));
 });
 
+test('§4.5/SUP-359 review: at rate "transit" station search stays narrowed to `bodies`, unlike rate "secondary_progression"', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('find_events', {
+    ...DAY_INPUT,
+    window_start: '2026-01-01T00:00:00Z', window_end: '2028-01-01T00:00:00Z',
+    bodies: ['Mars'], event_types: ['station'],
+  });
+
+  // Neptune and Saturn both genuinely station within this exact window (see the previous
+  // test) - if station search ever stopped narrowing to `bodies` at the transit rate the
+  // way it does at the progressed rate, they'd leak into this Mars-only request.
+  assert.ok(result.events.every((e) => e.body === 'Mars'));
+  assert.ok(!result.events.some((e) => ['Neptune', 'Saturn'].includes(e.body)));
+});
+
 test('§4.5 negative: North Node never stations even when explicitly requested (jitter, not real stations)', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
   const result = await server.handleToolCall('find_events', {

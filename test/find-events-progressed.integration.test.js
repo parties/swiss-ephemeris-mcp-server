@@ -5,7 +5,7 @@ import { jdFromDate, dateFromJd } from '../lib/ephemeris-series.js';
 import { progressedBodyProvider, progressedMcProvider, ephemerisJdForTarget } from '../lib/progressed-provider.js';
 import { TROPICAL_YEAR_DAYS, computeFictitiousLongitude } from '../lib/progressions.js';
 import { resolveChartPoint } from '../lib/aspects.js';
-import { DAY_CHART, PARTNER_CHART, SOUTHERN_CHART } from './fixtures/charts.js';
+import { DAY_CHART, PARTNER_CHART, SOUTHERN_CHART, POLAR_CHART } from './fixtures/charts.js';
 import { resolveEphePath, swetestAvailable } from './fixtures/ephe-path.js';
 
 const EPHE_PATH = resolveEphePath();
@@ -142,6 +142,39 @@ test('§6.1/§6.6 SOUTHERN_CHART: progressed Sun/Moon match calculate_secondary_
     const provider = progressedBodyProvider(body, { birthJd, yearLengthDays: Y });
     const got = provider.positionAt(targetJd).longitude;
     assert.ok(Math.abs(wrap180(got - secProg.progressed_planets[body].longitude)) < 1e-6);
+  }
+});
+
+// SUP-359 review follow-up: the progressed Ascendant's adaptive coarse-step subdivision
+// (index.js adaptiveJdGrid, unit-tested directly against synthetic curves in
+// test/adaptive-jd-grid.test.js) exists because its rate is unbounded near the poles - no
+// fixture before POLAR_CHART got anywhere close (the previous highest, DAY_CHART/
+// NIGHT_CHART, is 51.4769deg). This is the same §6.1 cross-tool-identity check as the other
+// fixtures, run at that latitude: it doesn't exercise adaptiveJdGrid itself (positionAt, not
+// a seriesFor scan), but it does prove the progressed-Ascendant formula (computeFictitiousLongitude
+// + the swetest -house lookup) that seriesFor's grid points are sampling stays correct there.
+test('§6.1/SUP-359 review POLAR_CHART: progressed Ascendant matches calculate_secondary_progressions at a latitude where its rate is unbounded', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+
+  const cases = [
+    [10, POLAR_CHART.expected.progressions.ascendant10yr],
+    [32, POLAR_CHART.expected.progressions.ascendant32yr],
+    [60, POLAR_CHART.expected.progressions.ascendant60yr],
+  ];
+
+  for (const [elapsedYears, expectedBaked] of cases) {
+    const targetDate = targetDateForIntegerYears(POLAR_CHART.datetime, elapsedYears);
+
+    const secProg = await server.handleToolCall('calculate_secondary_progressions', {
+      birth_datetime: POLAR_CHART.datetime, birth_latitude: POLAR_CHART.latitude, birth_longitude: POLAR_CHART.longitude,
+      target_date: targetDate,
+    });
+
+    const gotAsc = progressedAscendantLongitude(server, POLAR_CHART, targetDate, 'solar_arc');
+    assert.ok(Math.abs(wrap180(gotAsc - secProg.progressed_angles.Ascendant.longitude)) < 1e-6,
+      `${elapsedYears}yr: ${gotAsc} vs calculate_secondary_progressions' ${secProg.progressed_angles.Ascendant.longitude}`);
+    assert.ok(Math.abs(wrap180(gotAsc - expectedBaked)) < 1e-6,
+      `${elapsedYears}yr: ${gotAsc} vs baked fixture expectation ${expectedBaked}`);
   }
 });
 
