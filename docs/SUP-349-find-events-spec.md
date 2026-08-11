@@ -413,6 +413,14 @@ window; it is simply not what a year-ahead query is asking for.
 
 ### Q7 — Lunations: same machinery, own event type; eclipse as annotation with both timestamps
 
+> **Update (SUP-360 / SUP-365, PR #59):** `include_quarter_moons` below is now a deprecated
+> alias. `lunation_phases: "syzygy" | "quarters" | "eight_phase"` replaces it, adding a third,
+> wider set (Crescent/Gibbous/Disseminating/Balsamic at the 45°/135°/225°/315° band starts) on
+> top of the two ruled on here. The transit-rate default is unchanged (`"syzygy"`, i.e. New/Full
+> only); the values and sample payloads below that name `include_quarter_moons` still hold via
+> the alias. See `docs/SUP-360-eight-phase-lunation-spec.md` and the README's `lunation_phases`
+> entry for the current parameter surface.
+
 **Same machinery, separate event type.** New and Full Moon are Sun–Moon exact aspects at α = 0° and
 180°, found by the identical `wrap180` root-finder (§1.3 — and *not* by sign-testing the `-d0`
 differential, which makes every Full Moon a discontinuity). They get their own type because they are
