@@ -453,6 +453,78 @@ test('§4.7 quarters appear opt-in via include_quarter_moons', { skip: !HAS_SWET
   assertCloseIso(firstQuarter.datetime, '2026-01-26T04:47:24Z');
   assertCloseIso(lastQuarter.datetime, '2026-01-10T15:48:24Z');
   assert.equal(result.settings_used.include_quarter_moons, true);
+  assert.equal(result.settings_used.lunation_phases, 'quarters');
+});
+
+// --- SUP-360 lunation_phases -------------------------------------------------------------
+
+test('§7.4 transit-rate lunation counts: 25/50/99 at syzygy/quarters/eight_phase over 2026, default is 25', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const window = { ...DAY_INPUT, window_start: '2026-01-01T00:00:00Z', window_end: '2027-01-01T00:00:00Z', event_types: ['lunation'] };
+
+  const byDefault = await server.handleToolCall('find_events', window);
+  assert.equal(byDefault.events.length, 25);
+  assert.equal(byDefault.settings_used.lunation_phases, 'syzygy');
+
+  const syzygy = await server.handleToolCall('find_events', { ...window, lunation_phases: 'syzygy' });
+  assert.equal(syzygy.events.length, 25);
+
+  const quarters = await server.handleToolCall('find_events', { ...window, lunation_phases: 'quarters' });
+  assert.equal(quarters.events.length, 50);
+
+  const eightPhase = await server.handleToolCall('find_events', { ...window, lunation_phases: 'eight_phase' });
+  assert.equal(eightPhase.events.length, 99);
+});
+
+test('§7.7 eight_phase wire vocabulary is snake_case, never Title Case', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('find_events', {
+    ...DAY_INPUT,
+    window_start: '2026-01-01T00:00:00Z', window_end: '2027-01-01T00:00:00Z',
+    event_types: ['lunation'], lunation_phases: 'eight_phase',
+  });
+
+  const expectedPhases = new Set(['new', 'crescent', 'first_quarter', 'gibbous', 'full', 'disseminating', 'last_quarter', 'balsamic']);
+  assert.ok(result.events.length > 0);
+  for (const e of result.events) {
+    assert.ok(expectedPhases.has(e.phase), `unexpected phase value: ${e.phase}`);
+  }
+  assert.equal(result.settings_used.lunation_phase_scheme, '8-phase, bands start at exact aspect');
+});
+
+test('§7.3 include_minor does not gate the lunation phase set (guards §6.1 corollary)', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const window = { ...DAY_INPUT, window_start: '2026-01-01T00:00:00Z', window_end: '2027-01-01T00:00:00Z', event_types: ['lunation'] };
+
+  for (const lunation_phases of ['syzygy', 'quarters', 'eight_phase']) {
+    const withMinor = await server.handleToolCall('find_events', { ...window, lunation_phases, include_minor: true });
+    const withoutMinor = await server.handleToolCall('find_events', { ...window, lunation_phases, include_minor: false });
+    assert.deepEqual(withMinor.events, withoutMinor.events, `lunation_phases: "${lunation_phases}" must not vary with include_minor`);
+  }
+});
+
+test('§7.6 supplying both include_quarter_moons and lunation_phases errors', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  await assert.rejects(
+    () => server.handleToolCall('find_events', {
+      ...DAY_INPUT,
+      window_start: '2026-01-01T00:00:00Z', window_end: '2027-01-01T00:00:00Z',
+      event_types: ['lunation'], include_quarter_moons: true, lunation_phases: 'eight_phase',
+    }),
+    /Supply either include_quarter_moons or lunation_phases, not both/
+  );
+});
+
+test('find_events rejects an unknown lunation_phases value', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  await assert.rejects(
+    () => server.handleToolCall('find_events', {
+      ...DAY_INPUT,
+      window_start: '2026-01-01T00:00:00Z', window_end: '2027-01-01T00:00:00Z',
+      event_types: ['lunation'], lunation_phases: 'bogus',
+    }),
+    /lunation_phases must be one of/
+  );
 });
 
 test('§4.7 eclipse annotation carries both timestamps and is absent (not null) elsewhere', { skip: !HAS_SWETEST }, async () => {

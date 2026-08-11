@@ -270,6 +270,121 @@ test('§6.3 DAY_CHART 90yr: progressed lunation cycle is ~29.3yr, and no lunatio
   assert.ok(result.events.every((e) => !('eclipse' in e)), 'no progressed lunation may carry an eclipse key');
 });
 
+// --- SUP-360 §7: eight-phase progressed lunation cycle ----------------------------------------
+
+// Complete, verified 24-row expected-event table from the SUP-360 plan (§7), measured
+// through the shipped engine, docs/SUP-360-eight-phase-lunation-spec.md. `longitude` is
+// the progressed Moon's absolute ecliptic longitude at each phase crossing.
+const EXPECTED_EIGHT_PHASE_TABLE = [
+  { phase: 'first_quarter', datetime: '1992-12-12T00:26:00Z', longitude: 13.8160 },
+  { phase: 'gibbous', datetime: '1996-04-29T03:52:26Z', longitude: 62.2594 },
+  { phase: 'full', datetime: '1999-09-16T14:07:28Z', longitude: 110.7054 },
+  { phase: 'disseminating', datetime: '2003-05-12T14:08:09Z', longitude: 159.4250 },
+  { phase: 'last_quarter', datetime: '2007-05-22T23:06:56Z', longitude: 208.5266 },
+  { phase: 'balsamic', datetime: '2011-06-28T10:31:00Z', longitude: 257.6996 },
+  { phase: 'new', datetime: '2015-04-23T03:58:13Z', longitude: 306.5840 },
+  { phase: 'crescent', datetime: '2018-11-06T19:44:10Z', longitude: 355.1837 },
+  { phase: 'first_quarter', datetime: '2022-04-10T18:47:49Z', longitude: 43.6606 },
+  { phase: 'gibbous', datetime: '2025-09-19T01:10:07Z', longitude: 92.1506 },
+  { phase: 'full', datetime: '2029-04-21T11:11:47Z', longitude: 140.7832 },
+  { phase: 'disseminating', datetime: '2033-03-04T15:23:32Z', longitude: 189.6952 },
+  { phase: 'last_quarter', datetime: '2037-04-14T06:34:25Z', longitude: 238.8465 },
+  { phase: 'balsamic', datetime: '2041-04-09T18:09:24Z', longitude: 287.8675 },
+  { phase: 'new', datetime: '2044-11-14T17:53:55Z', longitude: 336.4924 },
+  { phase: 'crescent', datetime: '2048-03-21T07:08:09Z', longitude: 24.8570 },
+  { phase: 'first_quarter', datetime: '2051-08-03T14:44:40Z', longitude: 73.2368 },
+  { phase: 'gibbous', datetime: '2055-02-26T09:23:09Z', longitude: 121.8085 },
+  { phase: 'full', datetime: '2058-12-16T14:43:47Z', longitude: 170.6089 },
+  { phase: 'disseminating', datetime: '2062-12-28T14:15:05Z', longitude: 219.6300 },
+  { phase: 'last_quarter', datetime: '2067-02-08T07:17:25Z', longitude: 268.7241 },
+  { phase: 'balsamic', datetime: '2070-12-06T14:42:04Z', longitude: 317.5236 },
+  { phase: 'new', datetime: '2074-04-29T15:07:30Z', longitude: 5.8892 },
+  { phase: 'crescent', datetime: '2077-07-18T10:04:08Z', longitude: 54.0745 },
+];
+
+test('§7 SUP-360 spec table: DAY_CHART eight_phase 1990-2080 is exactly 24 events, matching the verified table', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('find_events', {
+    birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
+    window_start: DAY_CHART.datetime, window_end: '2080-01-01T00:00:00Z',
+    rate: 'secondary_progression', event_types: ['lunation'], lunation_phases: 'eight_phase',
+  });
+
+  assert.equal(result.events.length, EXPECTED_EIGHT_PHASE_TABLE.length);
+  result.events.forEach((e, i) => {
+    const expected = EXPECTED_EIGHT_PHASE_TABLE[i];
+    assert.equal(e.phase, expected.phase, `row ${i + 1}: expected phase ${expected.phase}, got ${e.phase}`);
+    assertCloseIso(e.datetime, expected.datetime);
+    assert.ok(Math.abs(e.longitude - expected.longitude) < 1e-2, `row ${i + 1}: expected longitude ~${expected.longitude}, got ${e.longitude}`);
+  });
+});
+
+test('§7.1 superset invariant: every progressed "quarters" event appears unchanged in "eight_phase"', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const window = {
+    birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
+    window_start: DAY_CHART.datetime, window_end: '2080-01-01T00:00:00Z',
+    rate: 'secondary_progression', event_types: ['lunation'],
+  };
+  const quarters = await server.handleToolCall('find_events', { ...window, lunation_phases: 'quarters' });
+  const eightPhase = await server.handleToolCall('find_events', { ...window, lunation_phases: 'eight_phase' });
+
+  assert.equal(quarters.events.length, 12);
+  assert.equal(eightPhase.events.length, 24);
+  for (const q of quarters.events) {
+    const match = eightPhase.events.find((e) => e.phase === q.phase && e.datetime === q.datetime);
+    assert.ok(match, `expected quarters event ${q.phase}@${q.datetime} to appear unchanged in eight_phase`);
+  }
+});
+
+test('§7.5 successive eight-phase step intervals span 3.219-4.114yr, not a uniform 3.66yr', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('find_events', {
+    birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
+    window_start: DAY_CHART.datetime, window_end: '2080-01-01T00:00:00Z',
+    rate: 'secondary_progression', event_types: ['lunation'], lunation_phases: 'eight_phase',
+  });
+
+  const steps = [];
+  for (let i = 1; i < result.events.length; i++) {
+    steps.push((new Date(result.events[i].datetime) - new Date(result.events[i - 1].datetime)) / (Y * 86400000));
+  }
+  const min = Math.min(...steps);
+  const max = Math.max(...steps);
+  assert.ok(min > 3.0 && min < 3.3, `expected min step ~3.219yr, got ${min}`);
+  assert.ok(max > 4.0 && max < 4.2, `expected max step ~4.114yr, got ${max}`);
+  assert.ok(!steps.every((s) => Math.abs(s - 3.66) < 0.05), 'steps must not be uniformly ~3.66yr');
+});
+
+test('§7.6 no progressed lunation carries an eclipse key at any lunation_phases setting', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const window = {
+    birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
+    window_start: DAY_CHART.datetime, window_end: '2080-01-01T00:00:00Z',
+    rate: 'secondary_progression', event_types: ['lunation'],
+  };
+  for (const lunation_phases of ['syzygy', 'quarters', 'eight_phase']) {
+    const result = await server.handleToolCall('find_events', { ...window, lunation_phases });
+    assert.ok(result.events.length > 0);
+    assert.ok(result.events.every((e) => !('eclipse' in e)), `lunation_phases: "${lunation_phases}" must never carry an eclipse key`);
+  }
+});
+
+test('§7.7 progressed eight_phase wire vocabulary is snake_case, never Title Case', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const result = await server.handleToolCall('find_events', {
+    birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
+    window_start: DAY_CHART.datetime, window_end: '2080-01-01T00:00:00Z',
+    rate: 'secondary_progression', event_types: ['lunation'], lunation_phases: 'eight_phase',
+  });
+
+  const expectedPhases = new Set(['new', 'crescent', 'first_quarter', 'gibbous', 'full', 'disseminating', 'last_quarter', 'balsamic']);
+  assert.ok(result.events.length > 0);
+  for (const e of result.events) {
+    assert.ok(expectedPhases.has(e.phase), `unexpected phase value: ${e.phase}`);
+  }
+});
+
 // --- §6.4 Orb model regression --------------------------------------------------------------
 
 test('§6.4 progressed Jupiter->natal Sun: absent under the fixed default, a lifetime-spanning envelope under moiety', { skip: !HAS_SWETEST }, async () => {
@@ -445,7 +560,7 @@ test('§6.6 an unknown rate is rejected', { skip: !HAS_SWETEST }, async () => {
 
 // --- Rate-inverted defaults (spec §2) ---------------------------------------------------------
 
-test('rate-inverted defaults: bodies, orb_model, include_angles, include_quarter_moons, window cap', { skip: !HAS_SWETEST }, async () => {
+test('rate-inverted defaults: bodies, orb_model, include_angles, lunation_phases, window cap', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
   const result = await server.handleToolCall('find_events', {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -455,7 +570,11 @@ test('rate-inverted defaults: bodies, orb_model, include_angles, include_quarter
   assert.deepEqual(result.settings_used.bodies, ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars']);
   assert.equal(result.settings_used.orb_model, 'fixed');
   assert.equal(result.settings_used.include_angles, true);
+  // SUP-360 ruling D: the progressed default is "eight_phase", not "quarters" - the
+  // deprecated include_quarter_moons boolean still reads true since eight_phase is a
+  // superset of quarters, but lunation_phases is where the actual default now lives.
   assert.equal(result.settings_used.include_quarter_moons, true);
+  assert.equal(result.settings_used.lunation_phases, 'eight_phase');
   assert.equal(result.settings_used.angle_method_used, 'solar_arc');
   assert.equal(result.settings_used.house_frame_used, 'progressed');
   assert.equal(result.settings_used.year_length_days, Y);

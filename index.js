@@ -21,7 +21,7 @@ import {
   parseHouseLine,
   parseChartPointLine,
 } from './lib/swetest-parse.js';
-import { moonPhase } from './lib/moon-phase.js';
+import { moonPhase, PHASE_SCHEME } from './lib/moon-phase.js';
 import {
   DEFAULT_ASPECT_BODIES,
   DECLINATION_ASPECT_BODIES,
@@ -180,6 +180,22 @@ function validateRate(value) {
   if (value === undefined) return 'transit';
   if (typeof value !== 'string' || !RATES.includes(value)) {
     throw new McpError(ErrorCode.InvalidParams, `rate must be one of: ${RATES.join(', ')}`);
+  }
+  return value;
+}
+
+// find_events lunation phase set (SUP-360 §3): which band starts of the eight-phase
+// soli-lunar cycle to emit as `lunation` events. Ordinal, not two independent booleans -
+// "quarters" and "eight_phase" both include New/Full, so there is no coherent state that
+// wants quarters excluded but the eight-phase set (which contains quarters) included. No
+// baked-in default here (unlike validateRate) - the default depends on `rate`, resolved
+// alongside `include_quarter_moons` in findEvents.
+const LUNATION_PHASES = ['syzygy', 'quarters', 'eight_phase'];
+
+function validateLunationPhases(value) {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || !LUNATION_PHASES.includes(value)) {
+    throw new McpError(ErrorCode.InvalidParams, `lunation_phases must be one of: ${LUNATION_PHASES.join(', ')}`);
   }
   return value;
 }
@@ -751,7 +767,7 @@ class SwissEphemerisServer {
           },
           {
             name: 'find_events',
-            description: 'Search a UTC window for time-domain astrological events: aspect contacts (`contacts[]`, grouped into orb episodes with every exact pass), and instants (`events[]`) - planetary stations, sign/house ingresses, and lunations (New/Full Moon, optionally quarters). At `rate: "transit"` (default) the moving side is transiting bodies, houses are the NATAL chart\'s own, and lunations carry eclipse annotation. At `rate: "secondary_progression"` the moving side is the day-for-a-year progressed chart instead (feeding calculate_secondary_progressions\' own arc/house math into the same search engine): progressed angles become searchable, houses can move with the progressed chart, defaults invert (see `bodies`/`orb_model`/`include_*` below), and eclipse annotation is structurally absent (progressions have no eclipse analogue). Correctness comes from segmenting the window at the moving side\'s own stations and enumerating every target crossing in each monotone segment, not from a scan step - no pass can be skipped between samples.',
+            description: 'Search a UTC window for time-domain astrological events: aspect contacts (`contacts[]`, grouped into orb episodes with every exact pass), and instants (`events[]`) - planetary stations, sign/house ingresses, and lunations (New/Full Moon by default, optionally the quarter or full eight-phase soli-lunar cycle via `lunation_phases`). At `rate: "transit"` (default) the moving side is transiting bodies, houses are the NATAL chart\'s own, and lunations carry eclipse annotation. At `rate: "secondary_progression"` the moving side is the day-for-a-year progressed chart instead (feeding calculate_secondary_progressions\' own arc/house math into the same search engine): progressed angles become searchable, houses can move with the progressed chart, defaults invert (see `bodies`/`orb_model`/`include_*`/`lunation_phases` below), and eclipse annotation is structurally absent (progressions have no eclipse analogue). Correctness comes from segmenting the window at the moving side\'s own stations and enumerating every target crossing in each monotone segment, not from a scan step - no pass can be skipped between samples.',
             inputSchema: {
               type: 'object',
               properties: {
@@ -783,7 +799,7 @@ class SwissEphemerisServer {
                 rate: {
                   type: 'string',
                   enum: ['transit', 'secondary_progression'],
-                  description: '"transit" (default): the moving side is transiting bodies at their real ephemeris position, matching calculate_transits. "secondary_progression": the moving side is the day-for-a-year progressed chart instead - progressed positions here match calculate_secondary_progressions exactly (same angle_method/house_frame semantics), and several defaults invert relative to "transit" (see `bodies`, `orb_model`, `include_angles`, `include_quarter_moons`). `angle_method`/`house_frame` require this to be "secondary_progression" and error otherwise.',
+                  description: '"transit" (default): the moving side is transiting bodies at their real ephemeris position, matching calculate_transits. "secondary_progression": the moving side is the day-for-a-year progressed chart instead - progressed positions here match calculate_secondary_progressions exactly (same angle_method/house_frame semantics), and several defaults invert relative to "transit" (see `bodies`, `orb_model`, `include_angles`, `lunation_phases`). `angle_method`/`house_frame` require this to be "secondary_progression" and error otherwise.',
                 },
                 angle_method: {
                   type: 'string',
@@ -827,7 +843,12 @@ class SwissEphemerisServer {
                 },
                 include_quarter_moons: {
                   type: 'boolean',
-                  description: 'Include First/Last Quarter alongside New/Full Moon in lunation events. Default depends on `rate`: false at "transit" (New/Full alone already run ~25/yr; quarters would double that with comparatively little added signal), true at "secondary_progression" (the ~29.31-year progressed lunation cycle is conventionally read by phase, and even with quarters a 90-year window yields only ~12 total).',
+                  description: 'DEPRECATED - use `lunation_phases` instead. Alias: true maps to lunation_phases: "quarters", false maps to lunation_phases: "syzygy". Supplying both include_quarter_moons and lunation_phases is an error, not a silent precedence rule. Kept indefinitely for backward compatibility - not scheduled for removal.',
+                },
+                lunation_phases: {
+                  type: 'string',
+                  enum: ['syzygy', 'quarters', 'eight_phase'],
+                  description: 'Which band starts of the Sun-Moon soli-lunar cycle to emit as `lunation` events in `events[]`, each a strict superset of the last: "syzygy" (New, Full - 2/cycle), "quarters" (+ First Quarter, Last Quarter - 4/cycle), "eight_phase" (+ Crescent, Gibbous, Disseminating, Balsamic - 8/cycle, the full Rudhyar-lineage cycle already used by calculate_planetary_positions\' phase field). Every event kept from one set to the next carries an identical `phase` and `datetime` - the wider sets add events, they never rename or re-time one. Default depends on `rate`: "syzygy" at "transit" (New/Full alone already run ~25/yr; the full cycle would run ~99/yr with comparatively little added signal for a forecasting scan), "eight_phase" at "secondary_progression" (the progressed lunation cycle is conventionally read by phase - including Balsamic, among the most-cited progressed phase readings - and even at eight phases a 90-year window yields only ~24 total). Independent of `include_minor`: these are exact crossings with no orb, not aspect contacts, even though 45deg/135deg also happen to be minor aspect angles. Errors if `include_quarter_moons` is also supplied.',
                 },
                 orb_overrides: {
                   type: 'object',
@@ -1711,6 +1732,7 @@ class SwissEphemerisServer {
       include_south_node,
       include_vertex,
       include_quarter_moons,
+      lunation_phases,
       orb_overrides,
       orb_model,
     } = args;
@@ -1778,6 +1800,14 @@ class SwissEphemerisServer {
     if (include_quarter_moons !== undefined && typeof include_quarter_moons !== 'boolean') {
       throw new McpError(ErrorCode.InvalidParams, 'include_quarter_moons must be a boolean');
     }
+    const validatedLunationPhases = validateLunationPhases(lunation_phases);
+    // No silent precedence rule between the deprecated boolean and its replacement (spec
+    // §3) - the eight-phase set strictly contains the quarters, so
+    // "include_quarter_moons: false, lunation_phases: 'eight_phase'" would otherwise say
+    // both "no quarters" and "all eight phases including the quarters" at once.
+    if (include_quarter_moons !== undefined && validatedLunationPhases !== undefined) {
+      throw new McpError(ErrorCode.InvalidParams, 'Supply either include_quarter_moons or lunation_phases, not both - include_quarter_moons is a deprecated alias for lunation_phases');
+    }
     if (bodies !== undefined && (!Array.isArray(bodies) || !bodies.every((b) => typeof b === 'string'))) {
       throw new McpError(ErrorCode.InvalidParams, 'bodies must be an array of strings');
     }
@@ -1804,7 +1834,15 @@ class SwissEphemerisServer {
     const includeAngles = include_angles ?? isProgressed;
     const includeSouthNode = include_south_node ?? false;
     const includeVertex = include_vertex ?? false;
-    const includeQuarterMoons = include_quarter_moons ?? isProgressed;
+    // Resolution order: lunation_phases, then the deprecated include_quarter_moons alias
+    // (true -> "quarters", false -> "syzygy"), then the rate-keyed default - "syzygy" at
+    // "transit" (bit-for-bit the shipped behaviour), "eight_phase" at
+    // "secondary_progression" (SUP-360 ruling D, superseding SUP-357 ruling #6's
+    // "quarters"; every "quarters" event this used to default to keeps an identical phase
+    // and datetime under "eight_phase" - see lib/event-search.js's LUNATION_PHASE_SETS).
+    const lunationPhases = validatedLunationPhases
+      ?? (include_quarter_moons !== undefined ? (include_quarter_moons ? 'quarters' : 'syzygy') : undefined)
+      ?? (isProgressed ? 'eight_phase' : 'syzygy');
     const orbOverrides = orb_overrides ?? {};
     const orbModel = orb_model ?? (isProgressed ? 'fixed' : 'moiety');
 
@@ -2148,7 +2186,7 @@ class SwissEphemerisServer {
     if (validatedEventTypes.includes('lunation')) {
       const sunProvider = providerFor('Sun');
       const moonProvider = providerFor('Moon');
-      const rawLunations = findLunations({ sunProvider, moonProvider, startJd, endJd, includeQuarterMoons, stepDays: scanStepDays });
+      const rawLunations = findLunations({ sunProvider, moonProvider, startJd, endJd, lunationPhases, stepDays: scanStepDays });
       // Eclipse annotation is routed off entirely at the progressed rate, not called and
       // discarded (spec §1.1): eclipsesFor would still spawn a real solar/lunar eclipse
       // search for whatever near-term calendar window the progressed instants happen to
@@ -2193,7 +2231,9 @@ class SwissEphemerisServer {
         include_angles: includeAngles,
         include_south_node: includeSouthNode,
         include_vertex: includeVertex,
-        include_quarter_moons: includeQuarterMoons,
+        include_quarter_moons: lunationPhases !== 'syzygy',
+        lunation_phases: lunationPhases,
+        lunation_phase_scheme: PHASE_SCHEME,
         node_type: 'true',
         ...(isProgressed ? {
           angle_method_used: validatedAngleMethod,
