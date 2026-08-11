@@ -22,6 +22,7 @@ export const DAY_CHART = {
     partOfFortune: 77.6453, // 17°39′ Gemini
     obliquity: 23.4423661, // true obliquity, 23°26′32.52″
     outOfBounds: ['Uranus', 'Ceres'],
+    declinationAspectCount: 13, // 1deg orb, 16 bodies (SUP-347 §4.2)
     trueNodeLongitude: 316.8703610, // 16°52′ Aquarius - default node_type (SUP-352)
     moonPhase: { phase: 'Crescent', elongation: 52.4533937, illuminatedFraction: 0.196208808 },
     // SUP-350 find_events engine — window 2026-01-01 .. 2029-01-01, default transiting
@@ -73,6 +74,7 @@ export const PARTNER_CHART = {
     sect: 'day',
     sunHouse: 7,
     partOfFortune: 342.9174, // 12°55′ Pisces
+    declinationAspectCount: 16, // 1deg orb, 16 bodies; tightest Mercury contraparallel Neptune 0.025838 (SUP-347 §4.5)
     moonPhase: { phase: 'Crescent', elongation: 67.6455373, illuminatedFraction: 0.311278704 },
     // SUP-356 calculate_secondary_progressions - elapsed 27.500 tropical yr -> progressed_datetime
     // 1995-07-31T12:00:00Z. Nonzero natal longitude (-74.0060) exercises the natal-longitude
@@ -98,6 +100,9 @@ export const SOUTHERN_CHART = {
     partOfFortune: 316.2748, // 16°16′ Aquarius
     obliquity: 23.4381391, // true obliquity - different from DAY_CHART's, so a hardcoded value fails here
     outOfBounds: [],
+    // 1deg orb, 16 bodies; tightest Saturn parallel Ceres 0.314272, includes a contraparallel
+    // pair (Mars-Pluto, 0.592604) so that branch is exercised outside DAY_CHART (SUP-347 §4.5)
+    declinationAspectCount: 8,
     // Moon - Sun raw difference here is -179.3393279 (Moon at 180.5949902, Sun at
     // 359.9343181) - negative, so this is the wrap case: it only lands at the correct
     // positive elongation if normalized with (% 360 + 360) % 360 rather than left signed.

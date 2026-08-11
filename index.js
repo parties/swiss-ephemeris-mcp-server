@@ -24,11 +24,15 @@ import {
 import { moonPhase } from './lib/moon-phase.js';
 import {
   DEFAULT_ASPECT_BODIES,
+  DECLINATION_ASPECT_BODIES,
   ANGLE_BODIES,
   ASPECTABLE_ANGLES,
   MAJOR_ASPECTS,
   calculateNatalAspects,
   calculateCrossChartAspects,
+  calculateDeclinationAspects,
+  calculateCrossChartDeclinationAspects,
+  resolveDeclinationOrbs,
   calculateHouseOverlay,
   toAspectBody,
   toPointPosition,
@@ -421,6 +425,15 @@ class SwissEphemerisServer {
                   enum: ['true', 'mean'],
                   description: 'Lunar Node type: "true" (default) is the true/osculating Node, which wobbles and can reverse direction. "mean" is the smoothed mean Node, which moves monotonically retrograde. The two differ by roughly 1-2 degrees at any given time - enough to change a sign or move a node aspect in or out of orb. Applies to North Node, South Node, and any node-derived aspect. Echoed back as `node_type` on the result.',
                 },
+                include_declination_aspects: {
+                  type: 'boolean',
+                  description: 'Include parallel and contraparallel contacts by declination (default: false) in `declination_aspects`. Parallels and contraparallels are read with roughly conjunction and opposition force respectively, and are invisible in ecliptic longitude.',
+                },
+                orb_overrides: {
+                  type: 'object',
+                  description: 'Accepts a `declination` key for `declination_aspects`, e.g. {"declination": {"parallel": 1.5, "contraparallel": 1}}. No other orb overrides apply to this tool.',
+                  additionalProperties: { type: ['number', 'object'] },
+                },
               },
               required: ['datetime', 'latitude', 'longitude'],
             },
@@ -468,6 +481,10 @@ class SwissEphemerisServer {
                   type: 'boolean',
                   description: 'Include the NATAL Vertex in `transit_aspects`. Default false, independent of `include_angles`. The transiting Vertex is always excluded from the transiting side, even if requested via `bodies`: like the transiting angles, it\'s an artifact of the moment\'s location/time and changes continuously, so transit-side Vertex contacts carry no meaning.',
                 },
+                include_declination_aspects: {
+                  type: 'boolean',
+                  description: 'Include parallel and contraparallel contacts by declination (default: false) in `declination_aspects`, transiting body vs natal point. Parallels and contraparallels are read with roughly conjunction and opposition force respectively, and are invisible in ecliptic longitude.',
+                },
                 bodies: {
                   type: 'array',
                   items: { type: 'string' },
@@ -475,13 +492,13 @@ class SwissEphemerisServer {
                 },
                 orb_overrides: {
                   type: 'object',
-                  description: 'Per-aspect orb overrides in degrees for transit_aspects, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"angle": {"square": 4}} or {"derived": {"square": 2}} tightens the angle (Ascendant/Midheaven/IC/Descendant) or derived (Part of Fortune/Vertex) class without touching planets.',
+                  description: 'Per-aspect orb overrides in degrees for transit_aspects, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"angle": {"square": 4}} or {"derived": {"square": 2}} tightens the angle (Ascendant/Midheaven/IC/Descendant) or derived (Part of Fortune/Vertex) class without touching planets. Also accepts a `declination` key, e.g. {"declination": {"parallel": 1.5, "contraparallel": 1}}, for `declination_aspects` - valid under either `orb_model` and independent of it (moiety-vs-class is a longitude concept).',
                   additionalProperties: { type: ['number', 'object'] },
                 },
                 orb_model: {
                   type: 'string',
                   enum: ['class', 'moiety'],
-                  description: 'Orb resolution model for transit_aspects. "moiety" (default) sums each body\'s half-orb (e.g. Sun 7.5°, Moon 6°) and scales by the aspect\'s multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under "moiety", orb_overrides takes a different two-knob shape instead: {"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}. "class" instead uses the fixed per-class orb tables above and honors orb_overrides in its flat/per-class shape. There is no single canonical orb table — see calculate_aspects\' orb_model description (or README) for moiety provenance and why sextile stays a major aspect despite its narrower 0.75 multiplier.',
+                  description: 'Orb resolution model for transit_aspects. "moiety" (default) sums each body\'s half-orb (e.g. Sun 7.5°, Moon 6°) and scales by the aspect\'s multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under "moiety", orb_overrides takes a different two-knob shape instead: {"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}. "class" instead uses the fixed per-class orb tables above and honors orb_overrides in its flat/per-class shape. There is no single canonical orb table — see calculate_aspects\' orb_model description (or README) for moiety provenance and why sextile stays a major aspect despite its narrower 0.75 multiplier. `declination_aspects` orbs are unaffected by this setting either way - see `orb_overrides`.',
                 },
               },
               required: ['birth_datetime', 'latitude', 'longitude'],
@@ -572,20 +589,24 @@ class SwissEphemerisServer {
                   type: 'boolean',
                   description: 'Include the Vertex in `angle_aspects` (planet-to-Vertex and Vertex-to-Vertex contacts across the two charts). Default false, independent of `include_angles` — setting this alone still produces an `angle_aspects` array, containing only Vertex contacts.',
                 },
+                include_declination_aspects: {
+                  type: 'boolean',
+                  description: 'Include parallel and contraparallel contacts by declination (default: false) in `declination_aspects`, person1 planet vs person2 planet. Parallels and contraparallels are read with roughly conjunction and opposition force respectively, and are invisible in ecliptic longitude.',
+                },
                 bodies: {
                   type: 'array',
                   items: { type: 'string' },
-                  description: 'Override the default body list (defaults to the full 17-body list: Sun..Pluto, North Node, Lilith, Chiron, Ceres, Pallas, Juno, Vesta). Applies to the aspect grid and angle-aspect planet side only — the house overlay always uses the 10 traditional planets.',
+                  description: 'Override the default body list (defaults to the full 17-body list: Sun..Pluto, North Node, Lilith, Chiron, Ceres, Pallas, Juno, Vesta). Applies to the aspect grid, angle-aspect planet side, and `declination_aspects` — the house overlay always uses the 10 traditional planets.',
                 },
                 orb_overrides: {
                   type: 'object',
-                  description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"angle": {"square": 4}} or {"derived": {"square": 2}} tightens the angle (Ascendant/Midheaven/IC/Descendant) or derived (Part of Fortune/Vertex) class without touching planets.',
+                  description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"angle": {"square": 4}} or {"derived": {"square": 2}} tightens the angle (Ascendant/Midheaven/IC/Descendant) or derived (Part of Fortune/Vertex) class without touching planets. Also accepts a `declination` key, e.g. {"declination": {"parallel": 1.5, "contraparallel": 1}}, for `declination_aspects` - valid under either `orb_model` and independent of it (moiety-vs-class is a longitude concept).',
                   additionalProperties: { type: ['number', 'object'] },
                 },
                 orb_model: {
                   type: 'string',
                   enum: ['class', 'moiety'],
-                  description: 'Orb resolution model. "moiety" (default) sums each body\'s half-orb and scales by the aspect\'s multiplier — see calculate_aspects for the formula and an example. Under "moiety", orb_overrides takes a different two-knob shape instead: {"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}. "class" instead uses the fixed per-class orb tables above and honors orb_overrides in its flat/per-class shape. There is no single canonical orb table — see calculate_aspects\' orb_model description (or README) for moiety provenance and why sextile stays a major aspect despite its narrower 0.75 multiplier.',
+                  description: 'Orb resolution model. "moiety" (default) sums each body\'s half-orb and scales by the aspect\'s multiplier — see calculate_aspects for the formula and an example. Under "moiety", orb_overrides takes a different two-knob shape instead: {"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}. "class" instead uses the fixed per-class orb tables above and honors orb_overrides in its flat/per-class shape. There is no single canonical orb table — see calculate_aspects\' orb_model description (or README) for moiety provenance and why sextile stays a major aspect despite its narrower 0.75 multiplier. `declination_aspects` orbs are unaffected by this setting either way - see `orb_overrides`.',
                 },
                 person1_house_system: {
                   type: 'string',
@@ -638,6 +659,10 @@ class SwissEphemerisServer {
                   type: 'boolean',
                   description: 'Include the Vertex in aspect calculations. Default false. Independent of `include_angles` — the Vertex is contested and highly sensitive to birth-time precision (more so than the Ascendant), so it\'s opt-in on its own. The anti-Vertex (Vertex + 180°) is never separately aspected, for the same double-counting reason IC/Descendant are excluded (see README Angle Aspects).',
                 },
+                include_declination_aspects: {
+                  type: 'boolean',
+                  description: 'Include parallel and contraparallel contacts by declination (default: false) in `declination_aspects`. Parallels and contraparallels are read with roughly conjunction and opposition force respectively, and are invisible in ecliptic longitude.',
+                },
                 bodies: {
                   type: 'array',
                   items: { type: 'string' },
@@ -645,13 +670,13 @@ class SwissEphemerisServer {
                 },
                 orb_overrides: {
                   type: 'object',
-                  description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"angle": {"square": 4}} or {"derived": {"square": 2}} tightens the angle (Ascendant/Midheaven/IC/Descendant) or derived (Part of Fortune/Vertex) class without touching planets.',
+                  description: 'Per-aspect orb overrides in degrees, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"angle": {"square": 4}} or {"derived": {"square": 2}} tightens the angle (Ascendant/Midheaven/IC/Descendant) or derived (Part of Fortune/Vertex) class without touching planets. Also accepts a `declination` key, e.g. {"declination": {"parallel": 1.5, "contraparallel": 1}}, for `declination_aspects` - valid under either `orb_model` and independent of it (moiety-vs-class is a longitude concept, and declination orbs are model-independent).',
                   additionalProperties: { type: ['number', 'object'] },
                 },
                 orb_model: {
                   type: 'string',
                   enum: ['class', 'moiety'],
-                  description: 'Orb resolution model. "moiety" (default) sums each body\'s half-orb (per-body table, e.g. Sun 7.5°, Moon 6°, Ascendant 2.5°) and scales by the aspect\'s multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under "moiety", orb_overrides takes a different two-knob shape instead: {"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}. "class" instead uses the fixed per-class orb tables above and honors orb_overrides in its flat/per-class shape. Provenance: there is no single canonical orb table in the tradition — the Sun..Saturn moieties are sourced (halved from a classical full-orb table), everything past Saturn plus angles and lots is a team-constructed, non-traditional convention (see README). Note sextile\'s 0.75 multiplier is a narrower orb, not a demotion: sextile is still returned with category "major" (it is a Ptolemaic aspect) under either orb_model.',
+                  description: 'Orb resolution model. "moiety" (default) sums each body\'s half-orb (per-body table, e.g. Sun 7.5°, Moon 6°, Ascendant 2.5°) and scales by the aspect\'s multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under "moiety", orb_overrides takes a different two-knob shape instead: {"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}. "class" instead uses the fixed per-class orb tables above and honors orb_overrides in its flat/per-class shape. Provenance: there is no single canonical orb table in the tradition — the Sun..Saturn moieties are sourced (halved from a classical full-orb table), everything past Saturn plus angles and lots is a team-constructed, non-traditional convention (see README). Note sextile\'s 0.75 multiplier is a narrower orb, not a demotion: sextile is still returned with category "major" (it is a Ptolemaic aspect) under either orb_model. `declination_aspects` orbs are unaffected by this setting either way - see `orb_overrides`.',
                 },
                 house_system: {
                   type: 'string',
@@ -1215,12 +1240,32 @@ class SwissEphemerisServer {
     return { bodiesWithLonSpeed, requestedBodies };
   }
 
+  // Declination-aspect body resolution (SUP-347): DECLINATION_ASPECT_BODIES intersected with
+  // whichever body list is actually in play (default or `bodies` override). North Node and
+  // every angle are never in DECLINATION_ASPECT_BODIES, so they drop out here unconditionally,
+  // independent of include_angles/include_south_node/include_vertex - a correctness rule
+  // (docs/SUP-345-declination-layer-spec.md §Q2/§Q3), not something those flags can override.
+  declinationBodyNames(requestedBodies) {
+    return requestedBodies.filter((name) => DECLINATION_ASPECT_BODIES.includes(name));
+  }
+
+  // Resolves declination body names to {name, declination} pairs from a chart's `planets`
+  // bucket - the only bucket DECLINATION_ASPECT_BODIES members live in. Missing declinations
+  // (e.g. a body dropped by the missing-ephemeris path) are filtered out rather than passed
+  // through as NaN.
+  toDeclinationBodies(chart, names) {
+    return names
+      .map((name) => ({ name, declination: chart.planets?.[name]?.declination }))
+      .filter((b) => b.declination !== undefined);
+  }
+
   calculateChartAspects(ephemerisResult, options = {}) {
     const {
       includeMinor = false,
       includeAngles = false,
       includeSouthNode = false,
       includeVertex = false,
+      includeDeclinationAspects = false,
       orbOverrides = {},
       orbModel = 'moiety',
     } = options;
@@ -1235,13 +1280,22 @@ class SwissEphemerisServer {
       includeSouthNode,
     });
 
+    const declinationBodyNames = this.declinationBodyNames(requestedBodies);
+    const declinationAspects = includeDeclinationAspects
+      ? calculateDeclinationAspects(this.toDeclinationBodies(ephemerisResult, declinationBodyNames), orbOverrides)
+      : undefined;
+
     return {
       aspects,
+      ...(includeDeclinationAspects ? { declination_aspects: declinationAspects } : {}),
       settings_used: {
         include_minor_aspects: includeMinor,
         include_angles: includeAngles,
         include_south_node: includeSouthNode,
         include_vertex: includeVertex,
+        include_declination_aspects: includeDeclinationAspects,
+        declination_orbs: resolveDeclinationOrbs(orbOverrides),
+        declination_bodies: declinationBodyNames,
         bodies: requestedBodies,
         orb_overrides: orbOverrides,
         orb_model: orbModel,
@@ -1259,6 +1313,7 @@ class SwissEphemerisServer {
       includeAngles = false,
       includeSouthNode = false,
       includeVertex = false,
+      includeDeclinationAspects = false,
       orbOverrides = {},
       orbModel = 'moiety',
     } = options;
@@ -1298,13 +1353,40 @@ class SwissEphemerisServer {
       applying: a.applying,
     }));
 
+    // Transiting body -> natal point, mirroring the row-key rename above. Unlike `aspects`,
+    // the transiting and natal declination values are read directly off each chart's own
+    // `planets` bucket - there's no "frozen speed" concept here since declination aspects
+    // never have a speed-derived `applying` to protect (always null - see
+    // calculateCrossChartDeclinationAspects).
+    const declinationBodyNames = this.declinationBodyNames(requestedBodies);
+    const declinationAspects = includeDeclinationAspects
+      ? calculateCrossChartDeclinationAspects(
+        this.toDeclinationBodies(transitChart, declinationBodyNames),
+        this.toDeclinationBodies(natalChart, declinationBodyNames),
+        orbOverrides
+      ).map((a) => ({
+        transiting_body: a.body_a,
+        natal_body: a.body_b,
+        aspect: a.aspect,
+        declination_a: a.declination_a,
+        declination_b: a.declination_b,
+        orb: a.orb,
+        orb_allowed: a.orb_allowed,
+        applying: a.applying,
+      }))
+      : undefined;
+
     return {
       aspects,
+      ...(includeDeclinationAspects ? { declination_aspects: declinationAspects } : {}),
       settings_used: {
         include_minor_aspects: includeMinor,
         include_angles: includeAngles,
         include_south_node: includeSouthNode,
         include_vertex: includeVertex,
+        include_declination_aspects: includeDeclinationAspects,
+        declination_orbs: resolveDeclinationOrbs(orbOverrides),
+        declination_bodies: declinationBodyNames,
         bodies: requestedBodies,
         orb_overrides: orbOverrides,
         orb_model: orbModel,
@@ -1358,6 +1440,33 @@ class SwissEphemerisServer {
         sign: person2Planets[a.body_b].sign,
         degree: person2Planets[a.body_b].degree,
       },
+    }));
+  }
+
+  // Cross-chart parallels/contraparallels between the two charts' planet sides (SUP-347).
+  // Same body-list resolution as calculateSynastryAspects (DECLINATION_ASPECT_BODIES
+  // intersected with the requested/default list), but its own pairing pass and row shape -
+  // declination aspects have no category/exact_angle/position fields (§3.4).
+  calculateSynastryDeclinationAspects(person1Planets, person2Planets, options = {}) {
+    const requestedBodies = this.resolveSynastryBodies(options.bodies);
+    const declinationBodyNames = this.declinationBodyNames(requestedBodies);
+
+    const toBodiesWithDeclination = (planets) => declinationBodyNames
+      .filter((name) => planets[name]?.declination !== undefined)
+      .map((name) => ({ name, declination: planets[name].declination }));
+
+    const bodiesA = toBodiesWithDeclination(person1Planets);
+    const bodiesB = toBodiesWithDeclination(person2Planets);
+
+    return calculateCrossChartDeclinationAspects(bodiesA, bodiesB, options.orbOverrides).map((a) => ({
+      person1_planet: a.body_a,
+      person2_planet: a.body_b,
+      aspect: a.aspect,
+      declination_a: a.declination_a,
+      declination_b: a.declination_b,
+      orb: a.orb,
+      orb_allowed: a.orb_allowed,
+      applying: a.applying,
     }));
   }
 
@@ -2098,7 +2207,15 @@ class SwissEphemerisServer {
   async handleToolCall(name, args) {
     switch (name) {
       case 'calculate_planetary_positions':
-        const { datetime, latitude, longitude, house_system, node_type: pp_node_type } = args;
+        const {
+          datetime,
+          latitude,
+          longitude,
+          house_system,
+          node_type: pp_node_type,
+          include_declination_aspects: pp_include_declination_aspects,
+          orb_overrides: pp_orb_overrides,
+        } = args;
 
         if (!datetime || typeof datetime !== 'string') {
           throw new McpError(
@@ -2106,14 +2223,14 @@ class SwissEphemerisServer {
             'datetime parameter is required and must be a string'
           );
         }
-        
+
         if (typeof latitude !== 'number' || latitude < -90 || latitude > 90) {
           throw new McpError(
             ErrorCode.InvalidParams,
             'latitude must be a number between -90 and 90'
           );
         }
-        
+
         if (typeof longitude !== 'number' || longitude < -180 || longitude > 180) {
           throw new McpError(
             ErrorCode.InvalidParams,
@@ -2121,7 +2238,34 @@ class SwissEphemerisServer {
           );
         }
 
-        return this.calculateEphemeris(datetime, latitude, longitude, validateHouseSystem(house_system), validateNodeType(pp_node_type));
+        if (pp_include_declination_aspects !== undefined && typeof pp_include_declination_aspects !== 'boolean') {
+          throw new McpError(ErrorCode.InvalidParams, 'include_declination_aspects must be a boolean');
+        }
+
+        if (pp_orb_overrides !== undefined && (typeof pp_orb_overrides !== 'object' || pp_orb_overrides === null || Array.isArray(pp_orb_overrides))) {
+          throw new McpError(ErrorCode.InvalidParams, 'orb_overrides must be an object');
+        }
+
+        // No orb_model concept on this tool - only orb_overrides.declination applies here, and
+        // invalidOrbOverrideKeys validates that key identically under either mode (SUP-347 §Q1).
+        const ppInvalidOrbKeys = invalidOrbOverrideKeys(pp_orb_overrides ?? {}, 'moiety');
+        if (ppInvalidOrbKeys.length) {
+          throw new McpError(ErrorCode.InvalidParams, `Unknown aspect in orb_overrides: ${ppInvalidOrbKeys[0]}`);
+        }
+
+        const positionsResult = this.calculateEphemeris(datetime, latitude, longitude, validateHouseSystem(house_system), validateNodeType(pp_node_type));
+
+        if (!pp_include_declination_aspects) {
+          return positionsResult;
+        }
+
+        return {
+          ...positionsResult,
+          declination_aspects: calculateDeclinationAspects(
+            this.toDeclinationBodies(positionsResult, DECLINATION_ASPECT_BODIES),
+            pp_orb_overrides ?? {}
+          ),
+        };
 
       case 'calculate_transits':
         const {
@@ -2134,6 +2278,7 @@ class SwissEphemerisServer {
           include_angles: transit_include_angles,
           include_south_node: transit_include_south_node,
           include_vertex: transit_include_vertex,
+          include_declination_aspects: transit_include_declination_aspects,
           bodies: transit_bodies,
           orb_overrides: transit_orb_overrides,
           orb_model: transit_orb_model,
@@ -2176,6 +2321,10 @@ class SwissEphemerisServer {
           throw new McpError(ErrorCode.InvalidParams, 'include_vertex must be a boolean');
         }
 
+        if (transit_include_declination_aspects !== undefined && typeof transit_include_declination_aspects !== 'boolean') {
+          throw new McpError(ErrorCode.InvalidParams, 'include_declination_aspects must be a boolean');
+        }
+
         if (transit_bodies !== undefined && (!Array.isArray(transit_bodies) || !transit_bodies.every((b) => typeof b === 'string'))) {
           throw new McpError(ErrorCode.InvalidParams, 'bodies must be an array of strings');
         }
@@ -2197,11 +2346,12 @@ class SwissEphemerisServer {
          const currentISOString = currentDate.toISOString();
          const currentEphemeris = this.calculateEphemeris(currentISOString, birth_latitude, birth_longitude, validatedTransitHouseSystem, validatedTransitNodeType);
 
-         const { aspects: transitAspects, settings_used: transitSettingsUsed } = this.calculateTransitAspects(natalChart, currentEphemeris, {
+         const { aspects: transitAspects, declination_aspects: transitDeclinationAspects, settings_used: transitSettingsUsed } = this.calculateTransitAspects(natalChart, currentEphemeris, {
            includeMinor: transit_include_minor,
            includeAngles: transit_include_angles,
            includeSouthNode: transit_include_south_node,
            includeVertex: transit_include_vertex,
+           includeDeclinationAspects: transit_include_declination_aspects,
            bodies: transit_bodies,
            orbOverrides: transit_orb_overrides,
            orbModel: transit_orb_model,
@@ -2211,6 +2361,7 @@ class SwissEphemerisServer {
            natal_chart: natalChart,
            current_transits: currentEphemeris,
            transit_aspects: transitAspects,
+           ...(transit_include_declination_aspects ? { declination_aspects: transitDeclinationAspects } : {}),
            settings_used: transitSettingsUsed,
            calculation_time: currentISOString
          };
@@ -2286,7 +2437,7 @@ class SwissEphemerisServer {
         };
 
       case 'calculate_synastry':
-        const { person1_datetime, person1_latitude, person1_longitude, person2_datetime, person2_latitude, person2_longitude, include_minor: synastry_include_minor, include_angles: synastry_include_angles, include_vertex: synastry_include_vertex, bodies: synastry_bodies, orb_overrides: synastry_orb_overrides, orb_model: synastry_orb_model, person1_house_system, person2_house_system, node_type: synastry_node_type } = args;
+        const { person1_datetime, person1_latitude, person1_longitude, person2_datetime, person2_latitude, person2_longitude, include_minor: synastry_include_minor, include_angles: synastry_include_angles, include_vertex: synastry_include_vertex, include_declination_aspects: synastry_include_declination_aspects, bodies: synastry_bodies, orb_overrides: synastry_orb_overrides, orb_model: synastry_orb_model, person1_house_system, person2_house_system, node_type: synastry_node_type } = args;
 
         if (synastry_include_minor !== undefined && typeof synastry_include_minor !== 'boolean') {
           throw new McpError(ErrorCode.InvalidParams, 'include_minor must be a boolean');
@@ -2298,6 +2449,10 @@ class SwissEphemerisServer {
 
         if (synastry_include_vertex !== undefined && typeof synastry_include_vertex !== 'boolean') {
           throw new McpError(ErrorCode.InvalidParams, 'include_vertex must be a boolean');
+        }
+
+        if (synastry_include_declination_aspects !== undefined && typeof synastry_include_declination_aspects !== 'boolean') {
+          throw new McpError(ErrorCode.InvalidParams, 'include_declination_aspects must be a boolean');
         }
 
         if (synastry_bodies !== undefined && (!Array.isArray(synastry_bodies) || !synastry_bodies.every((b) => typeof b === 'string'))) {
@@ -2402,12 +2557,24 @@ class SwissEphemerisServer {
           });
         }
 
+        // Optional cross-chart parallels/contraparallels (SUP-347), planet side only - the
+        // Node and angles are never in DECLINATION_ASPECT_BODIES, so this is independent of
+        // include_angles/include_vertex.
+        let synastryDeclinationAspects;
+        if (synastry_include_declination_aspects) {
+          synastryDeclinationAspects = this.calculateSynastryDeclinationAspects(person1NatalChart.planets, person2NatalChart.planets, {
+            bodies: synastry_bodies,
+            orbOverrides: synastry_orb_overrides,
+          });
+        }
+
         return {
           person1_chart: person1NatalChart,
           person2_chart: person2NatalChart,
           synastry_aspects: aspects,
           house_overlay: houseOverlay,
           ...((synastry_include_angles || synastry_include_vertex) ? { angle_aspects: angleAspects } : {}),
+          ...(synastry_include_declination_aspects ? { declination_aspects: synastryDeclinationAspects } : {}),
           calculation_time: new Date().toISOString()
         };
 
@@ -2420,6 +2587,7 @@ class SwissEphemerisServer {
           include_angles,
           include_south_node,
           include_vertex,
+          include_declination_aspects,
           bodies: aspects_bodies,
           orb_overrides,
           orb_model,
@@ -2464,6 +2632,10 @@ class SwissEphemerisServer {
           throw new McpError(ErrorCode.InvalidParams, 'include_vertex must be a boolean');
         }
 
+        if (include_declination_aspects !== undefined && typeof include_declination_aspects !== 'boolean') {
+          throw new McpError(ErrorCode.InvalidParams, 'include_declination_aspects must be a boolean');
+        }
+
         if (aspects_bodies !== undefined && (!Array.isArray(aspects_bodies) || !aspects_bodies.every((b) => typeof b === 'string'))) {
           throw new McpError(ErrorCode.InvalidParams, 'bodies must be an array of strings');
         }
@@ -2475,11 +2647,12 @@ class SwissEphemerisServer {
         validateOrbModel(orb_model);
 
         const aspectsEphemerisResult = this.calculateEphemeris(aspects_datetime, aspects_latitude, aspects_longitude, validateHouseSystem(aspects_house_system), validateNodeType(aspects_node_type));
-        const { aspects: chartAspects, settings_used } = this.calculateChartAspects(aspectsEphemerisResult, {
+        const { aspects: chartAspects, declination_aspects: chartDeclinationAspects, settings_used } = this.calculateChartAspects(aspectsEphemerisResult, {
           includeMinor: include_minor,
           includeAngles: include_angles,
           includeSouthNode: include_south_node,
           includeVertex: include_vertex,
+          includeDeclinationAspects: include_declination_aspects,
           bodies: aspects_bodies,
           orbOverrides: orb_overrides,
           orbModel: orb_model,
@@ -2488,6 +2661,7 @@ class SwissEphemerisServer {
         return {
           ...aspectsEphemerisResult,
           aspects: chartAspects,
+          ...(include_declination_aspects ? { declination_aspects: chartDeclinationAspects } : {}),
           settings_used,
         };
 

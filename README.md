@@ -13,6 +13,7 @@ A Model Context Protocol (MCP) server that provides astronomical calculations us
 - **Speed**: Every planet now includes a `speed` field (deg/day, signed, negative = retrograde)
 - **Declination**: Every planet includes `ecliptic_latitude`, `declination`, and out-of-bounds status; angles, cusps, and Vertex include `declination`
 - **Aspects**: Natal chart aspect calculation with applying/separating status
+- **Declination Aspects**: Opt-in parallel/contraparallel contacts by declination — see [Declination Aspects](#declination-aspects)
 
 ## Installation
 
@@ -70,6 +71,8 @@ Calculate astronomical data for a specific date, time, and location.
 - `longitude` (number): Longitude in decimal degrees (-180 to 180)
 - `house_system` (string, optional): House system code. Default `P`. See [House Systems](#house-systems).
 - `node_type` (string, optional): `"true"` (default) or `"mean"` Lunar Node. See [Lunar Node Type](#lunar-node-type).
+- `include_declination_aspects` (boolean, optional): Include parallel/contraparallel contacts by declination in `declination_aspects`. Default `false`. See [Declination Aspects](#declination-aspects).
+- `orb_overrides` (object, optional): Accepts a `declination` key for `declination_aspects`, e.g. `{"declination": {"parallel": 1.5, "contraparallel": 1}}` — see [Declination Aspects](#declination-aspects). No other orb overrides apply to this tool.
 
 **Returns:**
 - `planets`: Positions of all planets and celestial bodies. Each entry has `longitude`, `sign`, `degree`, `speed`, `ecliptic_latitude` (decimal degrees, + = north of the ecliptic), `declination` (decimal degrees, + = north of the celestial equator), `out_of_bounds` (`true` when `|declination|` exceeds the obliquity of the date), and `out_of_bounds_by` (decimal degrees past the boundary when out of bounds, `null` otherwise). All 17 bodies carry all four fields uniformly, including North Node (`ecliptic_latitude: 0`, always in bounds). The Sun is hard-coded `out_of_bounds: false`: its ~0.5″ apparent ecliptic latitude (light-time and aberration) can push its apparent declination a fraction of an arcsecond past true obliquity right at a solstice, which would otherwise flag the body that defines the boundary as having left it.
@@ -80,6 +83,7 @@ Calculate astronomical data for a specific date, time, and location.
 - `obliquity_type`: Always `"true"` — the audit trail for every `out_of_bounds` flag, distinguishing it from the mean obliquity (differs by up to a few arcseconds).
 - `house_system`: The house system code actually used
 - `node_type`: The Lunar Node type actually used (`"true"` or `"mean"`) — labels `planets['North Node']` and `additional_points['South Node']`.
+- `declination_aspects` (only present when `include_declination_aspects` is `true`): Array of parallel/contraparallel contacts by declination, `body_a`/`body_b` naming — see [Declination Aspects](#declination-aspects).
 - `warnings` (only present if something's missing): if an ephemeris data file needed for a body isn't found under `SE_EPHE_PATH`, that body is omitted from `planets` entirely rather than reported at a fabricated 0° Aries position, and a message naming the missing file is added here.
 
 ### `calculate_transits`
@@ -96,14 +100,16 @@ Calculate birth chart positions and current transits for comparison, including a
 - `include_angles` (boolean, optional): Include the NATAL chart angles (Ascendant, Midheaven, IC, Descendant, Part of Fortune) in `transit_aspects`. Transiting angles are always excluded, even if requested via `bodies`: they are artifacts of the moment's location and time of day (the transiting Ascendant sweeps the whole zodiac daily), so transit-side angle contacts change minute to minute and carry no meaning. Default `false`.
 - `include_south_node` (boolean, optional): Include South Node in `transit_aspects`. Default `false`.
 - `include_vertex` (boolean, optional): Include the NATAL Vertex in `transit_aspects`. Default `false`, independent of `include_angles`. The transiting Vertex is always excluded from the transiting side, even if requested via `bodies` — like the transiting angles, it's an artifact of the moment's location/time, so transit-side Vertex contacts carry no meaning.
-- `bodies` (array of strings, optional): Override the default body list for `transit_aspects`. Angle bodies are always excluded from the transiting side, even if listed here.
-- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees for `transit_aspects`. Also accepts a per-class shape, e.g. `{"angle": {"square": 4}}` or `{"derived": {"square": 2}}`, to move only the `angle` class (Ascendant/Midheaven/IC/Descendant) or `derived` class (Part of Fortune, Vertex) without touching `body`. `angle` defaults to 5/4/3/1.5/1.5/1 deg (conjunction-opposition/square/trine-sextile/semisextile-quincunx/semisquare-sesquiquadrate/quintile-biquintile); `derived` defaults to 3/2/2/1 deg (conjunction-opposition/square/trine-sextile/all minors) — both tighter than `body`'s defaults.
-- `orb_model` (string, optional): Orb resolution model for `transit_aspects`. `"moiety"` (default) sums each body's half-orb (e.g. Sun 7.5°, Moon 6°) and scales by the aspect's multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under `"moiety"`, `orb_overrides` takes a different two-knob shape instead: `{"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}`. `"class"` instead uses the fixed per-class tables above and honors `orb_overrides`. See [Orb Models](#orb-models) for moiety provenance and why sextile stays a major aspect.
+- `include_declination_aspects` (boolean, optional): Include parallel/contraparallel contacts by declination in `declination_aspects`, transiting body vs natal point. Default `false`. See [Declination Aspects](#declination-aspects).
+- `bodies` (array of strings, optional): Override the default body list for `transit_aspects` and `declination_aspects`. Angle bodies are always excluded from the transiting side, even if listed here.
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees for `transit_aspects`. Also accepts a per-class shape, e.g. `{"angle": {"square": 4}}` or `{"derived": {"square": 2}}`, to move only the `angle` class (Ascendant/Midheaven/IC/Descendant) or `derived` class (Part of Fortune, Vertex) without touching `body`. `angle` defaults to 5/4/3/1.5/1.5/1 deg (conjunction-opposition/square/trine-sextile/semisextile-quincunx/semisquare-sesquiquadrate/quintile-biquintile); `derived` defaults to 3/2/2/1 deg (conjunction-opposition/square/trine-sextile/all minors) — both tighter than `body`'s defaults. Also accepts a `declination` key for `declination_aspects`, e.g. `{"declination": {"parallel": 1.5, "contraparallel": 1}}` — see [Declination Aspects](#declination-aspects).
+- `orb_model` (string, optional): Orb resolution model for `transit_aspects`. `"moiety"` (default) sums each body's half-orb (e.g. Sun 7.5°, Moon 6°) and scales by the aspect's multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under `"moiety"`, `orb_overrides` takes a different two-knob shape instead: `{"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}`. `"class"` instead uses the fixed per-class tables above and honors `orb_overrides`. See [Orb Models](#orb-models) for moiety provenance and why sextile stays a major aspect. `declination_aspects` orbs are unaffected by this setting either way.
 
 **Returns:**
 - `natal_chart`: Complete birth chart data
 - `current_transits`: Current planetary positions
 - `transit_aspects`: Array of aspects from transiting bodies to the natal chart, sorted by orb ascending. Each entry has `transiting_body`, `natal_body`, `aspect`, `category`, `orb`, `exact_angle`, `applying`.
+- `declination_aspects` (only present when `include_declination_aspects` is `true`): Array of parallel/contraparallel contacts, transiting body vs natal point — see [Declination Aspects](#declination-aspects).
 - `settings_used`: The resolved settings (including `orb_model` and `node_type`) actually applied to `transit_aspects`.
 - `calculation_time`: Timestamp of transit calculation
 
@@ -145,9 +151,10 @@ Calculate synastry chart between two people for relationship compatibility analy
 - `include_minor` (boolean, optional): Include minor aspects. Default `false`.
 - `include_angles` (boolean, optional): Also compute `angle_aspects` (planet-to-angle and angle-to-angle contacts). Default `false`.
 - `include_vertex` (boolean, optional): Include the Vertex in `angle_aspects` (planet-to-Vertex and Vertex-to-Vertex contacts across the two charts). Default `false`, independent of `include_angles` — setting this alone still produces an `angle_aspects` array, containing only Vertex contacts.
-- `bodies` (array of strings, optional): Override the default body list for `synastry_aspects` and the planet side of `angle_aspects` (defaults to the full 17-body list: Sun..Pluto, North Node, Lilith, Chiron, Ceres, Pallas, Juno, Vesta). Must be names known to the server; an unknown name throws `InvalidParams`. `house_overlay` is unaffected by this override — it always reports the same 13 points (10 major bodies plus Ascendant, Midheaven, and Part of Fortune).
-- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees. Also accepts a per-class shape, e.g. `{"angle": {"square": 4}}` or `{"derived": {"square": 2}}`, to move only the `angle` class (Ascendant/Midheaven/IC/Descendant) or `derived` class (Part of Fortune, Vertex) without touching `body`. `angle` defaults to 5/4/3/1.5/1.5/1 deg (conjunction-opposition/square/trine-sextile/semisextile-quincunx/semisquare-sesquiquadrate/quintile-biquintile); `derived` defaults to 3/2/2/1 deg (conjunction-opposition/square/trine-sextile/all minors) — both tighter than `body`'s defaults.
-- `orb_model` (string, optional): Orb resolution model. `"moiety"` (default) sums each body's half-orb and scales by the aspect's multiplier — see `calculate_aspects` below for the formula and an example. Under `"moiety"`, `orb_overrides` takes a different two-knob shape instead: `{"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}`. `"class"` instead uses the fixed per-class tables above and honors `orb_overrides`. See [Orb Models](#orb-models) for moiety provenance and why sextile stays a major aspect.
+- `include_declination_aspects` (boolean, optional): Include parallel/contraparallel contacts by declination in `declination_aspects`, person1 planet vs person2 planet. Default `false`. See [Declination Aspects](#declination-aspects).
+- `bodies` (array of strings, optional): Override the default body list for `synastry_aspects`, the planet side of `angle_aspects`, and `declination_aspects` (defaults to the full 17-body list: Sun..Pluto, North Node, Lilith, Chiron, Ceres, Pallas, Juno, Vesta). Must be names known to the server; an unknown name throws `InvalidParams`. `house_overlay` is unaffected by this override — it always reports the same 13 points (10 major bodies plus Ascendant, Midheaven, and Part of Fortune).
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees. Also accepts a per-class shape, e.g. `{"angle": {"square": 4}}` or `{"derived": {"square": 2}}`, to move only the `angle` class (Ascendant/Midheaven/IC/Descendant) or `derived` class (Part of Fortune, Vertex) without touching `body`. `angle` defaults to 5/4/3/1.5/1.5/1 deg (conjunction-opposition/square/trine-sextile/semisextile-quincunx/semisquare-sesquiquadrate/quintile-biquintile); `derived` defaults to 3/2/2/1 deg (conjunction-opposition/square/trine-sextile/all minors) — both tighter than `body`'s defaults. Also accepts a `declination` key for `declination_aspects`, e.g. `{"declination": {"parallel": 1.5, "contraparallel": 1}}` — see [Declination Aspects](#declination-aspects).
+- `orb_model` (string, optional): Orb resolution model. `"moiety"` (default) sums each body's half-orb and scales by the aspect's multiplier — see `calculate_aspects` below for the formula and an example. Under `"moiety"`, `orb_overrides` takes a different two-knob shape instead: `{"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}`. `"class"` instead uses the fixed per-class tables above and honors `orb_overrides`. See [Orb Models](#orb-models) for moiety provenance and why sextile stays a major aspect. `declination_aspects` orbs are unaffected by this setting either way.
 
 **Returns:**
 - `person1_chart`: Complete birth chart for person 1
@@ -155,6 +162,7 @@ Calculate synastry chart between two people for relationship compatibility analy
 - `synastry_aspects`: Array of planetary aspects between the charts. Defaults to the full 17-body list (Sun..Pluto, North Node, Lilith, Chiron, Ceres, Pallas, Juno, Vesta); override with `bodies`.
 - `house_overlay`: `{ person1_planets_in_person2_houses, person2_planets_in_person1_houses }` — for each of the 10 major bodies plus Ascendant, Midheaven, and Part of Fortune (13 points total; Descendant and IC are not included), which house (1-12) of the other person's chart it falls into. These 13 points are fixed regardless of `bodies` — the override only affects `synastry_aspects` and the planet side of `angle_aspects`.
 - `angle_aspects` (only present when `include_angles` or `include_vertex` is `true`): Array of aspects involving Ascendant/Midheaven/Part of Fortune (when `include_angles`) and/or the Vertex (when `include_vertex`) across the two charts. Same shape as `synastry_aspects` — `aspect`, `category`, `orb`, `exact_angle`, `applying`, and `person1_position`/`person2_position` (`{longitude, sign, degree}`) — but with `person1_point`/`person2_point` naming the point instead of `person1_planet`/`person2_planet`. The planet side defaults to the same full 17-body list as `synastry_aspects` (also overridable via `bodies`). IC, Descendant, and the anti-Vertex are not separately aspected — see [Angle Aspects](#angle-aspects) for why, and how to derive their contacts from this array.
+- `declination_aspects` (only present when `include_declination_aspects` is `true`): Array of parallel/contraparallel contacts, person1 planet vs person2 planet — see [Declination Aspects](#declination-aspects).
 - `calculation_time`: Timestamp of calculation
 
 ### `calculate_aspects`
@@ -169,16 +177,18 @@ Calculate natal chart aspects for a given datetime and coordinates. Returns plan
 - `include_angles` (boolean, optional): Include chart angles in aspect calculations — Ascendant, Midheaven, and Part of Fortune are aspected; IC and Descendant are computed but never aspected (see [Angle Aspects](#angle-aspects)). Default `false`.
 - `include_south_node` (boolean, optional): Include South Node in aspect calculations. Default `false`.
 - `include_vertex` (boolean, optional): Include the Vertex in aspect calculations. Default `false`. Independent of `include_angles` — the Vertex is contested and highly sensitive to birth-time precision (more so than the Ascendant), so it's opt-in on its own. The anti-Vertex (Vertex + 180°) is never separately aspected, for the same double-counting reason IC/Descendant are excluded (see [Angle Aspects](#angle-aspects)).
-- `bodies` (array of strings, optional): Override the default aspect body list. Must be names known to the server.
-- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees, e.g. `{"conjunction": 10}`. Also accepts a per-class shape, e.g. `{"angle": {"square": 4}}` or `{"derived": {"square": 2}}`, to move only the `angle` class (Ascendant/Midheaven/IC/Descendant) or `derived` class (Part of Fortune, Vertex) without touching `body`. `angle` defaults to 5/4/3/1.5/1.5/1 deg (conjunction-opposition/square/trine-sextile/semisextile-quincunx/semisquare-sesquiquadrate/quintile-biquintile); `derived` defaults to 3/2/2/1 deg (conjunction-opposition/square/trine-sextile/all minors) — both tighter than `body`'s defaults.
-- `orb_model` (string, optional): Orb resolution model. `"moiety"` (default) sums each body's half-orb (per-body table, e.g. Sun 7.5°, Moon 6°, Ascendant 2.5°) and scales by the aspect's multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under `"moiety"`, `orb_overrides` takes a different two-knob shape instead: `{"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}` — `moieties` keys are body/point names, `multipliers` keys are aspect names. `"class"` instead uses the fixed per-class tables above and honors `orb_overrides`. See [Orb Models](#orb-models) for moiety provenance and why sextile stays a major aspect.
+- `include_declination_aspects` (boolean, optional): Include parallel/contraparallel contacts by declination in `declination_aspects`. Default `false`. See [Declination Aspects](#declination-aspects).
+- `bodies` (array of strings, optional): Override the default aspect body list. Must be names known to the server. Also filters `declination_aspects`.
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees, e.g. `{"conjunction": 10}`. Also accepts a per-class shape, e.g. `{"angle": {"square": 4}}` or `{"derived": {"square": 2}}`, to move only the `angle` class (Ascendant/Midheaven/IC/Descendant) or `derived` class (Part of Fortune, Vertex) without touching `body`. `angle` defaults to 5/4/3/1.5/1.5/1 deg (conjunction-opposition/square/trine-sextile/semisextile-quincunx/semisquare-sesquiquadrate/quintile-biquintile); `derived` defaults to 3/2/2/1 deg (conjunction-opposition/square/trine-sextile/all minors) — both tighter than `body`'s defaults. Also accepts a `declination` key for `declination_aspects`, e.g. `{"declination": {"parallel": 1.5, "contraparallel": 1}}` — see [Declination Aspects](#declination-aspects).
+- `orb_model` (string, optional): Orb resolution model. `"moiety"` (default) sums each body's half-orb (per-body table, e.g. Sun 7.5°, Moon 6°, Ascendant 2.5°) and scales by the aspect's multiplier (1.0 for conjunction/opposition/trine/square, 0.75 for sextile, 0.375 for the minors) — e.g. a Sun-Moon conjunction allows (7.5+6)×1.0 = 13.5°. Under `"moiety"`, `orb_overrides` takes a different two-knob shape instead: `{"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}` — `moieties` keys are body/point names, `multipliers` keys are aspect names. `"class"` instead uses the fixed per-class tables above and honors `orb_overrides`. See [Orb Models](#orb-models) for moiety provenance and why sextile stays a major aspect. `declination_aspects` orbs are unaffected by this setting either way.
 - `house_system` (string, optional): House system code. Default `P`. See [House Systems](#house-systems).
 - `node_type` (string, optional): `"true"` (default) or `"mean"` Lunar Node. See [Lunar Node Type](#lunar-node-type).
 
 **Returns:**
 - All fields from `calculate_planetary_positions` (`planets`, `houses`, `chart_points`, `additional_points`, `obliquity`, `obliquity_type`, `datetime`, `coordinates`, `house_system`, `node_type`)
 - `aspects`: Array of qualifying aspects, sorted by orb ascending. Each entry has `body_a`, `body_b`, `aspect`, `category` (`major`/`minor`), `aspect_angle`, `separation`, `orb`, `orb_allowed`, and `applying` (`true`/`false`/`null` — `null` when applying/separating cannot be determined, e.g. angle points with no speed, near-stationary bodies, or an exact hit).
-- `settings_used`: The resolved settings (`include_minor_aspects`, `include_angles`, `include_south_node`, `include_vertex`, `bodies`, `orb_overrides`, `orb_model`, `node_type`) actually applied to the calculation.
+- `declination_aspects` (only present when `include_declination_aspects` is `true`): Array of parallel/contraparallel contacts by declination — see [Declination Aspects](#declination-aspects).
+- `settings_used`: The resolved settings (`include_minor_aspects`, `include_angles`, `include_south_node`, `include_vertex`, `include_declination_aspects`, `declination_orbs`, `declination_bodies`, `bodies`, `orb_overrides`, `orb_model`, `node_type`) actually applied to the calculation.
 
 ### `calculate_secondary_progressions`
 
@@ -281,6 +291,45 @@ If you need a body's aspect to IC or Descendant, derive it from the returned Mid
 The orb and applying/separating values carry over unchanged; only the aspect label and its complementary body name change. This is lossless **because** the `angle` orb class (which governs ASC/MC/IC/DSC) is mirror-symmetric by construction — every mirror pair (conjunction/opposition, sextile/trine, semisextile/quincunx, semisquare/sesquiquadrate) carries an equal orb, enforced by a unit test. A body's IC or Descendant contact reached only via a quintile or biquintile to MC/ASC has no mirror partner and is simply absent from the derivation — there is no way to recover it from the returned aspect array.
 
 The Vertex works the same way, gated separately by `include_vertex`: the anti-Vertex (its 180° opposite point) is not a computed chart point and is never separately aspected, for the same double-counting reason IC/Descendant are excluded. It's simply `(vertex_longitude + 180) % 360`, and its aspect to any body is the 180°-shifted mirror of that body's Vertex aspect (same table as above, since the Vertex uses the `derived` orb class, which is symmetric).
+
+### Declination Aspects
+
+A **parallel** (both bodies at the same declination) reads with roughly conjunction force; a **contraparallel** (equal declination, opposite hemispheres) reads with roughly opposition force. Both are invisible in ecliptic longitude — two bodies can be a parallel with no longitude aspect between them at all, which is the entire reason this feature exists (see the worked example below).
+
+Opt in with `include_declination_aspects: true` on `calculate_planetary_positions`, `calculate_aspects`, `calculate_transits`, and `calculate_synastry`. Default `false`; when unset, `declination_aspects` is simply absent from the result. On the three aspect tools, `settings_used` still echoes the resolved settings unconditionally, matching `include_vertex`; `calculate_planetary_positions` has no `settings_used` block to echo into.
+
+**Orb: a flat 1° for both parallel and contraparallel** — the mainstream Western default (Solar Fire, Astro Gold, astro.com). Contraparallel intentionally takes the same orb as parallel, matching how this server already treats conjunction/opposition as equal-orb pairs in every longitude orb class. The 1°30′ luminary widening some schools use is a real minority convention, not the default here — reach it via `orb_overrides: {"declination": {"parallel": 1.5, "contraparallel": 1}}`. This is its own orb table, independent of `orb_model` (`"moiety"` vs `"class"` is a longitude concept and never changes a declination orb) and independent of every longitude orb class (`body`/`angle`/`derived`) — an override to one never touches the other.
+
+**Bodies: 16, not the full 17** — every body in the default aspect list except the **North Node**:
+
+> Sun, Moon, Mercury, Venus, Mars, Jupiter, Saturn, Uranus, Neptune, Pluto, Lilith, Chiron, Ceres, Pallas, Juno, Vesta
+
+The rule: a declination contact is only reported between points whose declination is an independently computed physical datum. The Node's ecliptic latitude is exactly zero by definition, so its declination is fully determined by its longitude (`declination = arcsin(sin(obliquity) × sin(longitude))`) — a "parallel" to it would just restate a longitude fact under a declination label, not report a real contact. Its declination is still reported on the body itself (see [Features](#features)); it simply never participates in `declination_aspects`. `bodies` filters this 16-body set the same way it filters the longitude set (the Node drop is unconditional and not overridable); the resolved set is always echoed as `settings_used.declination_bodies`.
+
+**Angles never form declination aspects** — Ascendant, Midheaven, IC, Descendant, Vertex, and Part of Fortune still carry a `declination` field (positional output), but never appear in `declination_aspects`, with or without `include_angles`/`include_vertex`. Every angle sits on the ecliptic by construction (latitude 0), so the same restatement-of-longitude problem as the Node applies — and it's worse: `IC = Midheaven + 180°` and `Descendant = Ascendant + 180°` means their declinations are exact negations, so aspecting all four would report `Ascendant contraparallel Descendant` and `Midheaven contraparallel IC` at orb exactly 0°, a mirror double-count with no astrological meaning.
+
+**`applying` is always `null`.** Declination rate is not longitude rate — a body direct in longitude can be moving north or south in declination depending on where it sits relative to the solstices, and its declination rate passes through zero at the solstitial points regardless of its longitude speed. Deriving applying/separating from longitude speed would therefore be confidently wrong rather than merely approximate, so this server doesn't do it. Computing a real declination-based `applying` would need a second ephemeris sample and is a documented future improvement, not implemented here.
+
+**Row shape** (`calculate_aspects`; `calculate_transits`/`calculate_synastry` rename the body keys, see below):
+
+```jsonc
+{
+  "body_a": "Mercury",
+  "body_b": "Vesta",
+  "aspect": "parallel",       // "parallel" | "contraparallel"
+  "declination_a": -20.3919084,
+  "declination_b": -19.4967293,
+  "orb": 0.8951791,           // |δa − δb| for parallel, |δa + δb| for contraparallel
+  "orb_allowed": 1,
+  "applying": null            // always null - see above
+}
+```
+
+No `category` (major/minor has no declination analogue) and no `separation`/`exact_angle` (the separation *is* the orb). `calculate_transits` uses `transiting_body`/`natal_body`; `calculate_synastry` uses `person1_planet`/`person2_planet`. Unlike `aspects`/`transit_aspects`/`synastry_aspects`, `orb`/`declination_a`/`declination_b` are always numbers, never `.toFixed(2)` strings.
+
+A pair can report *both* a parallel and a contraparallel at once — that happens only when both bodies sit within about half the orb of the celestial equator, and it's correct, not a bug (e.g. two bodies each within half a degree of 0° declination are simultaneously ~parallel to each other and ~contraparallel to each other's mirror across the equator).
+
+**Worked example:** on a reference chart, Mercury and Vesta sit 21.77° apart in longitude — no longitude aspect at all, at any orb this server offers. But Mercury's declination is −20.39° and Vesta's is −19.50°, a difference of 0.90° — well inside the 1° parallel orb. `include_declination_aspects: true` surfaces that contact; without it, this server would report these two bodies as unrelated.
 
 ### Orb Models
 
