@@ -8,6 +8,13 @@
   ephemeris (vendor/swisseph) through the shipped lib/event-search.js engine and
   lib/progressed-provider.js, using only test/fixtures/charts.js (DAY_CHART). No new
   fixture is required.
+
+  Revision 2 (2026-08-11, same day): re-verified against main at adc42a5, which landed
+  SUP-360's eight-phase `lunation_phases` (#59) AFTER revision 1's figures were taken.
+  Revision 1's rulings all survive unchanged. What changed: §6 gained the four new phase
+  bands (they are exact pair-aspect targets, so the identity now covers eight phases, not
+  four), §6's episode/pass counts are corrected, and five code anchors were re-pointed.
+  Every §6/§9.1 figure below was re-measured at adc42a5, not carried over.
 -->
 
 # SUP-361 — Progressed-to-progressed (and transit-to-transit) pair aspects for `find_events`
@@ -20,7 +27,7 @@ aspects other than the progressed Sun–Moon lunation.
 
 The issue's own framing is right and worth confirming before anything else: **no new engine
 primitive is needed.** Two-moving-body composition already ships twice — `relativeLunarProvider`
-(`lib/event-search.js:345`) for lunations, and `relativeMovingProvider` (`index.js:363`) for
+(`lib/event-search.js:345`) for lunations, and `relativeMovingProvider` (`index.js:379`) for
 `house_frame: "progressed"`. Everything below was measured by composing the *shipped* providers
 exactly the way an implementation would, so this is a surface/defaults/semantics ruling, not a
 feasibility study.
@@ -149,7 +156,9 @@ Three requirements, in decreasing order of how much they are astrology rather th
 > **Scope note.** The astrological content is the *independence of the two body lists*, the
 > *opt-in*, and the default set. The spelling — `include_pair_aspects` vs `include_mutual_aspects`,
 > `pair_bodies` vs `pair_set` — is engineering's call. `include_pair_aspects` follows the shipped
-> `include_minor` / `include_angles` / `include_vertex` / `include_quarter_moons` style.
+> `include_minor` / `include_angles` / `include_vertex` style. (Revision 1 also cited
+> `include_quarter_moons`; #59 replaced that boolean with the `lunation_phases` enum, so it is no
+> longer a precedent for anything. The three above still are.)
 
 **Explicit pair lists (`pairs: [["Venus","Mars"]]`) are not recommended for v1.** `pair_bodies`
 already narrows to any set a practitioner asks about, and a two-level array is a validation surface
@@ -163,7 +172,7 @@ with no astrological content. If a real request appears, add it later.
 
 Same reason `station` excludes them (SUP-349 Q5, reaffirmed by SUP-357 ruling #5): the true Node —
 which is what `find_events` uses, unconditionally (`settings_used.node_type` is hard-coded
-`'true'`, `index.js:2197`) — reverses direction from orbital wobble roughly **once per year of
+`'true'`, `index.js:2237`) — reverses direction from orbital wobble roughly **once per year of
 life** at the progressed rate. A pair provider's speed is a *difference*, so that jitter flips the
 relative rate's sign against any slow partner, shredding segmentation and emitting the same aspect
 as a burst of passes. Visible even at the 1-sample-per-year coarse grid: Pluto–North Node shows 10
@@ -212,7 +221,7 @@ reachable by explicit `pair_bodies`; keep it out of the default.
 ### 4.5 The angles in general: eligible via `include_angles`, but not defaulted
 
 Progressed ASC/MC are already moving-side sources for `contacts[]` at
-`rate: "secondary_progression"` (`index.js:2140-2146`), gated by `include_angles`, which defaults
+`rate: "secondary_progression"` (`index.js:2178-2183`), gated by `include_angles`, which defaults
 `true` at that rate. Pairs should inherit exactly that gate — but the **default `pair_bodies`
 should stay the five real bodies**, because each Ascendant sample costs two `swetest -house`
 spawns through `progressedFrameAt` and a Moon–ASC pair needs on the order of 10³ of them for a
@@ -256,9 +265,11 @@ computed off the **relative** rate at the contact.
 Turning on pairs at the progressed rate makes progressed Sun conjunct progressed Moon appear in
 `pair_contacts[]` *and* as a `lunation` event with `phase: "new"`. **Keep both.** Verified through
 the shipped engine (uncached, window 1990-01-01 → 2080-01-01, `DAY_CHART`), the pair search's
-conjunction/opposition/square passes reproduce `findLunations`' New/Full/quarter datetimes **to the
-second, all twelve**, and reproduce `docs/SUP-360-eight-phase-lunation-spec.md` §7's published
-table exactly:
+conjunction/opposition/square passes reproduce `findLunations({ lunationPhases: 'quarters' })`
+datetimes **to the second, all twelve**, and reproduce
+`docs/SUP-360-eight-phase-lunation-spec.md` §7's published table exactly. Re-measured at `adc42a5`
+(post-#59): all twelve rows are **unchanged** — the shipped `lunation_phases` rewrite moved the
+parameter, not the search.
 
 | Pair-aspect pass | Lunation | Datetime |
 |---|---|---|
@@ -275,21 +286,54 @@ table exactly:
 | square @ 270 | `last_quarter` | 2067-02-08T07:17:25Z |
 | conjunction @ 0 | `new` | 2074-04-29T15:07:30Z |
 
-Neither view subsumes the other, which is why suppressing either one would lose information:
+### 6.1 The identity now covers all eight phases (new in revision 2)
 
-- The **lunation event** carries the *directed* phase — it can say `first_quarter` vs
-  `last_quarter`. The **aspect row structurally cannot**: an aspect is undirected, so both quarters
-  come back labelled `square` (visible above as `@90` vs `@270`, which is a search-target artifact,
-  not a phase name).
+#59 shipped `lunation_phases: "eight_phase"`, adding band starts at 45° / 135° / 225° / 315°.
+Those are **exactly** the semisquare and sesquiquadrate targets, so the overlap is no longer four
+phases — it is all eight, and it extends into the *minor* aspect set. Measured at `adc42a5`, same
+window and chart, `include_minor` on: **all 24 eight-phase lunations are reproduced to the second**,
+3 per phase, none missing and none extra.
+
+| Lunation phase | Band angle | Pair aspect (search angle) | First instance |
+|---|---|---|---|
+| `crescent` | 45 | `semisquare` @ 45 | 2018-11-06T19:44:10Z |
+| `gibbous` | 135 | `sesquiquadrate` @ 135 | 1996-04-29T03:52:26Z |
+| `disseminating` | 225 | `sesquiquadrate` @ 225 | 2003-05-12T14:08:09Z |
+| `balsamic` | 315 | `semisquare` @ 315 | 2011-06-28T10:31:00Z |
+
+This makes the "keep both views" ruling **stronger**, not weaker, because it sharpens exactly where
+the aspect row loses information:
+
+- The **lunation event** carries the *directed* phase. The **aspect row structurally cannot** — a
+  pair aspect is undirected, and `find_events` searches both sides of every non-0/180 angle under
+  one canonical label (`index.js:1991-1993`). So one `semisquare` row cannot distinguish
+  **`crescent` (waxing, 45°) from `balsamic` (waning, 315°)**, and one `sesquiquadrate` row cannot
+  distinguish `gibbous` from `disseminating` — a waxing/waning collapse, which is the single
+  distinction the eight-phase cycle exists to make. Same folding argument the shipped code now
+  states at `lib/event-search.js:389-395`; it applies verbatim to the pair path.
 - The **aspect row** carries the *orb envelope* — `enters_orb` / `leaves_orb` /
   `closest_approach` — which the lunation event has no field for. "How long is my progressed Full
   Moon in effect" is only answerable from the aspect row.
 
-Also note the pair search returns **25** Sun–Moon episodes per 90 years against the lunation
-search's 12 at quarters: the extra 13 are the trines and sextiles, which have no lunation
-vocabulary at all. Suppressing the pair would delete them.
+### 6.2 Corrected counts (revision 1 conflated episodes with passes)
 
-Document the overlap in the README, and make the identity above an assertion (§8.1).
+Revision 1 said "25 episodes … the extra 13 are the trines and sextiles." 25 was the **pass**
+count, not the episode count, and "no lunation vocabulary at all" is no longer true of the minors.
+Re-measured, majors only, 90 years:
+
+- **26 orb episodes, 25 exact passes.** 12 of the 25 passes are the `quarters` lunations
+  (3 each of new / full / first_quarter / last_quarter); the other 13 are sextile (7) and trine (6)
+  passes, which do have no lunation vocabulary.
+- The 26th episode is a `square` @ 90 that **enters orb 2079-11-19T17:36:03Z and never perfects
+  before the window closes** — `passes: []`, `leaves_orb_truncated: true`,
+  `closest_approach.orb` 11.9918°. This is a second instance of the §9.4 shape and the reason
+  §9.1 must assert passes and episodes as two different numbers.
+- With `include_minor: true`: **37 more episodes, 37 more passes**, of which **12 are the four new
+  phase bands** above and 25 are semisextile / quincunx / quintile / biquintile — which still have
+  no lunation vocabulary.
+
+Suppressing the pair would delete all of those. Document the overlap in the README, and make the
+identity an assertion (§9.1).
 
 ---
 
@@ -341,7 +385,7 @@ that is not any body's position.
 
 `findLunations` already solves this and is the pattern to copy: it re-reads
 `moonProvider.positionAt(crossing.jd)` and reports the Moon's absolute longitude
-(`lib/event-search.js:382-389`). A pair pass must report **each body's own** longitude/sign/degree
+(`lib/event-search.js:406-414`). A pair pass must report **each body's own** longitude/sign/degree
 at the pass instant.
 
 ### 8.2 `retrograde` would be a coin flip decided by pair order
@@ -426,6 +470,16 @@ order. This single assertion exercises the relative composition, the directed-di
 (§8.3), the segmentation, and the refinement at once; nothing else in the ticket fails as
 informatively.
 
+**Assert it against `lunation_phases: "eight_phase"` as well, with `include_minor: true`** (§6.1):
+all **24** phase datetimes must be reproduced to the second, adding semisquare ↔
+`crescent` (45) / `balsamic` (315) and sesquiquadrate ↔ `gibbous` (135) / `disseminating` (225).
+Build the assertion from `findLunations`' own output rather than a hard-coded list, so it keeps
+holding if the eight-phase set is extended again.
+
+Assert episodes and passes as **two different numbers** — majors over 90 years are **26 episodes /
+25 passes**, not 25/25 (§6.2). A test that checks only one of the two would pass against an
+implementation that silently drops the no-pass episode.
+
 ### 9.2 Counts for the default progressed pair set
 
 The ten-row table in §2: 109 orb episodes, 108 exact passes over 90 years, of which 103 episodes
@@ -488,7 +542,7 @@ failure mode a hemisphere sign error produces here.
 | Deferred | Why |
 |---|---|
 | **Progressed-to-progressed aspects in `calculate_secondary_progressions`** | The snapshot tool returns `aspects_to_natal` only — it has no progressed-to-progressed section, so this ticket would make an aspect *searchable* that is not *displayable*, the mirror of the gap `include_minor`'s default exists to avoid. Worth a small companion ticket; not this one's scope, and not a blocker. |
-| **Planetary phase for non-lunar pairs** (Rudhyar's eight phases applied to e.g. progressed Sun–Saturn) | Already deferred by SUP-360 §8. §8.3's directed separation is deliberately the hook it would need. |
+| **Planetary phase for non-lunar pairs** (Rudhyar's eight phases applied to e.g. progressed Sun–Saturn) | Already deferred by SUP-360 §8. §8.3's directed separation is deliberately the hook it would need — and §6.1 shows the pair path already finds every 45° band start for Sun–Moon, so the remaining work there is naming and direction, not geometry. Still a separate ticket: which pairs a phase *reading* is legitimate for is its own convention argument. |
 | **`applying` / `separating` on `find_events` rows** | The tool has never carried it at either rate; adding it for pairs only would be a lopsided surface. `computeApplying` is already two-body-correct if it is ever wanted. |
 | **Explicit `pairs: [[a, b], ...]` input** | `pair_bodies` covers every request on file (§3). |
 | **Pairs across rates** (progressed Venus to *transiting* Saturn) | A third relation again — and a real technique — but it needs a two-rate request shape, not a pair list. No request on file. |
