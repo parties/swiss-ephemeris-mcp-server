@@ -435,7 +435,7 @@ test('§4.7 quarters are absent by default, present opt-in, matching the spec ti
   const startJd = jd('2026-01-01T00:00:00Z');
   const endJd = jd('2027-01-01T00:00:00Z');
   const withQuarters = findLunations({
-    sunProvider: providerFor('Sun'), moonProvider: providerFor('Moon'), startJd, endJd, includeQuarterMoons: true,
+    sunProvider: providerFor('Sun'), moonProvider: providerFor('Moon'), startJd, endJd, lunationPhases: 'quarters',
   });
 
   const firstQuarter = withQuarters.find((l) => l.phase === 'first_quarter');
@@ -444,6 +444,39 @@ test('§4.7 quarters are absent by default, present opt-in, matching the spec ti
   assert.ok(lastQuarter);
   assertCloseIso(firstQuarter.datetime, '2026-01-26T04:47:24Z');
   assertCloseIso(lastQuarter.datetime, '2026-01-10T15:48:24Z');
+});
+
+// SUP-360 §7.1/§7.2 at engine level - the eight-phase set is a strict superset of
+// "quarters" (identical phase AND datetime for every kept event) and correctly
+// distinguishes waxing from waning, which a folded-aspect implementation could not do
+// (§6.1: 45deg Crescent and 315deg Balsamic would otherwise collapse to one event).
+test('§7.1/§7.2 eight_phase is a superset of quarters, and Crescent/Balsamic + Gibbous/Disseminating are distinct', { skip: !HAS_SWETEST }, () => {
+  const startJd = jd('2026-01-01T00:00:00Z');
+  const endJd = jd('2027-01-01T00:00:00Z');
+  const quarters = findLunations({
+    sunProvider: providerFor('Sun'), moonProvider: providerFor('Moon'), startJd, endJd, lunationPhases: 'quarters',
+  });
+  const eightPhase = findLunations({
+    sunProvider: providerFor('Sun'), moonProvider: providerFor('Moon'), startJd, endJd, lunationPhases: 'eight_phase',
+  });
+
+  // Not an exact x2: a bounded window's partial cycle at the edge can contribute fewer
+  // than 8 phase starts while still contributing 2 quarters (spec §7.4 pins 99, not 100,
+  // for this exact 2026 window). The superset loop below carries the real invariant.
+  assert.ok(eightPhase.length > quarters.length);
+  for (const q of quarters) {
+    const match = eightPhase.find((e) => e.phase === q.phase && e.datetime === q.datetime);
+    assert.ok(match, `expected quarters event ${q.phase}@${q.datetime} to appear unchanged in eight_phase`);
+  }
+
+  const crescents = eightPhase.filter((e) => e.phase === 'crescent');
+  const balsamics = eightPhase.filter((e) => e.phase === 'balsamic');
+  const gibbouses = eightPhase.filter((e) => e.phase === 'gibbous');
+  const disseminatings = eightPhase.filter((e) => e.phase === 'disseminating');
+  assert.ok(crescents.length > 0 && balsamics.length > 0);
+  assert.ok(gibbouses.length > 0 && disseminatings.length > 0);
+  for (const c of crescents) assert.ok(!balsamics.some((b) => b.datetime === c.datetime));
+  for (const g of gibbouses) assert.ok(!disseminatings.some((d) => d.datetime === g.datetime));
 });
 
 // Spec §1.6/Q7 - the eclipse maximum and the exact syzygy are different instants (up to
