@@ -5,6 +5,9 @@ import {
   ANGLE_BODIES,
   ASPECTABLE_ANGLES,
   DEFAULT_ORBS,
+  DEFAULT_ASPECT_BODIES,
+  DECLINATION_ASPECT_BODIES,
+  DECLINATION_ORBS,
   ORB_CLASSES,
   ORB_MODELS,
   BODY_ORB_CLASS,
@@ -16,6 +19,9 @@ import {
   computeApplying,
   calculateNatalAspects,
   calculateCrossChartAspects,
+  calculateDeclinationAspects,
+  calculateCrossChartDeclinationAspects,
+  resolveDeclinationOrbs,
   calculateHouseOverlay,
   resolveChartPoint,
   toAspectBody,
@@ -696,4 +702,125 @@ test('moiety invariant: Sun-Ascendant conjunction orb is wider than Pluto-Ascend
   assert.equal(sunAscOrb, 10);
   assert.equal(plutoAscOrb, 5);
   assert.ok(sunAscOrb > plutoAscOrb);
+});
+
+// SUP-347: declination aspects (parallel/contraparallel). lib/aspects.js unit-level coverage;
+// see test/declination-aspects.integration.test.js for end-to-end tool wiring against the
+// verified fixture figures in docs/SUP-345-declination-layer-spec.md §4.
+
+test('DECLINATION_ASPECT_BODIES is DEFAULT_ASPECT_BODIES minus North Node - 16, not 17', () => {
+  assert.equal(DECLINATION_ASPECT_BODIES.length, 16);
+  assert.ok(!DECLINATION_ASPECT_BODIES.includes('North Node'));
+  assert.deepEqual(DECLINATION_ASPECT_BODIES, DEFAULT_ASPECT_BODIES.filter((n) => n !== 'North Node'));
+});
+
+test('DECLINATION_ORBS is a flat 1deg for both parallel and contraparallel', () => {
+  assert.deepEqual(DECLINATION_ORBS, { parallel: 1, contraparallel: 1 });
+});
+
+test('resolveDeclinationOrbs: unset orb_overrides falls back to DECLINATION_ORBS', () => {
+  assert.deepEqual(resolveDeclinationOrbs(), DECLINATION_ORBS);
+  assert.deepEqual(resolveDeclinationOrbs({}), DECLINATION_ORBS);
+});
+
+test('resolveDeclinationOrbs: orb_overrides.declination merges over the default, per-key', () => {
+  assert.deepEqual(resolveDeclinationOrbs({ declination: { parallel: 1.5 } }), { parallel: 1.5, contraparallel: 1 });
+});
+
+test('calculateDeclinationAspects: parallel match within orb', () => {
+  const bodies = [
+    { name: 'Mercury', declination: -20.3919084 },
+    { name: 'Vesta', declination: -19.4967293 },
+  ];
+  const [match] = calculateDeclinationAspects(bodies);
+  assert.equal(match.aspect, 'parallel');
+  assert.equal(match.body_a, 'Mercury');
+  assert.equal(match.body_b, 'Vesta');
+  assert.ok(Math.abs(match.orb - 0.8951791) < 1e-6);
+  assert.equal(match.orb_allowed, 1);
+  assert.equal(match.applying, null);
+});
+
+test('calculateDeclinationAspects: contraparallel match uses |a + b|, not |a - b|', () => {
+  const bodies = [
+    { name: 'Sun', declination: -10 },
+    { name: 'Moon', declination: 10.5 },
+  ];
+  const [match] = calculateDeclinationAspects(bodies);
+  assert.equal(match.aspect, 'contraparallel');
+  assert.ok(Math.abs(match.orb - 0.5) < 1e-9);
+});
+
+test('calculateDeclinationAspects: no match outside orb (parallel and contraparallel both miss)', () => {
+  const bodies = [
+    { name: 'A', declination: 0 },
+    { name: 'B', declination: 5 },
+  ];
+  assert.deepEqual(calculateDeclinationAspects(bodies), []);
+});
+
+test('calculateDeclinationAspects: a pair can report both parallel and contraparallel when both declinations are near zero', () => {
+  const bodies = [
+    { name: 'A', declination: 0.3 },
+    { name: 'B', declination: -0.3 },
+  ];
+  const matches = calculateDeclinationAspects(bodies);
+  assert.equal(matches.length, 2);
+  assert.deepEqual(matches.map((m) => m.aspect).sort(), ['contraparallel', 'parallel']);
+});
+
+test('calculateDeclinationAspects: sorted by orb ascending', () => {
+  const bodies = [
+    { name: 'A', declination: 0 },
+    { name: 'B', declination: 0.9 },
+    { name: 'C', declination: 0.1 },
+  ];
+  const matches = calculateDeclinationAspects(bodies);
+  for (let i = 1; i < matches.length; i++) {
+    assert.ok(matches[i - 1].orb <= matches[i].orb);
+  }
+});
+
+test('calculateDeclinationAspects: orb_overrides.declination widens/narrows the match set', () => {
+  const bodies = [
+    { name: 'A', declination: 0 },
+    { name: 'B', declination: 1.5 },
+  ];
+  assert.deepEqual(calculateDeclinationAspects(bodies), []);
+  const [match] = calculateDeclinationAspects(bodies, { declination: { parallel: 2 } });
+  assert.equal(match.aspect, 'parallel');
+  assert.equal(match.orb_allowed, 2);
+});
+
+test('calculateCrossChartDeclinationAspects: pairs every body in A against every body in B', () => {
+  const bodiesA = [{ name: 'Sun', declination: 10 }];
+  const bodiesB = [{ name: 'Moon', declination: 10.2 }, { name: 'Mars', declination: -10.1 }];
+  const matches = calculateCrossChartDeclinationAspects(bodiesA, bodiesB);
+  assert.equal(matches.length, 2);
+  assert.ok(matches.some((m) => m.aspect === 'parallel' && m.body_b === 'Moon'));
+  assert.ok(matches.some((m) => m.aspect === 'contraparallel' && m.body_b === 'Mars'));
+});
+
+test('invalidOrbOverrideKeys: orb_overrides.declination is accepted under moiety mode', () => {
+  assert.deepEqual(invalidOrbOverrideKeys({ declination: { parallel: 2, contraparallel: 1.5 } }, 'moiety'), []);
+});
+
+test('invalidOrbOverrideKeys: orb_overrides.declination is accepted under class mode', () => {
+  assert.deepEqual(invalidOrbOverrideKeys({ declination: { parallel: 2, contraparallel: 1.5 } }, 'class'), []);
+});
+
+test('invalidOrbOverrideKeys: an unknown nested key under declination is rejected in both modes', () => {
+  assert.deepEqual(invalidOrbOverrideKeys({ declination: { conjunction: 2 } }, 'moiety'), ['conjunction']);
+  assert.deepEqual(invalidOrbOverrideKeys({ declination: { conjunction: 2 } }, 'class'), ['conjunction']);
+});
+
+test('invalidOrbOverrideKeys: declination does not interfere with ordinary moiety/class validation alongside it', () => {
+  assert.deepEqual(
+    invalidOrbOverrideKeys({ declination: { parallel: 2 }, moieties: { Sun: 10 } }, 'moiety'),
+    []
+  );
+  assert.deepEqual(
+    invalidOrbOverrideKeys({ declination: { parallel: 2 }, conjunction: 12 }, 'class'),
+    []
+  );
 });
