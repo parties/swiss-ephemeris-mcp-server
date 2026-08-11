@@ -227,6 +227,15 @@ Measured progressed motion for `DAY_CHART`, over 90 years of life:
 | 7 | **Q9** window: default 1 yr, **max 10 yr** | **Default 10 yr, max 120 yr.** | A progressed query is inherently lifetime-scale. At the 10-year cap the progressed Sun moves 10°, which cannot answer any question the technique is used for. 120 years is a life bound, not an ephemeris one. |
 | 8 | **Q2** `include_angles: false` | **Default `true`**, matching SUP-356. | Progressed ASC/MC contacts are the headline output. Paired with the mandatory §1.3 sensitivity number so the honesty burden sits on data, not omission. |
 
+> **Update (SUP-360 / SUP-365, PR #59):** ruling #6's default has since moved past `true`
+> (i.e. `"quarters"`) to `lunation_phases: "eight_phase"` — SUP-360 ruling D, on the same
+> "conventionally read by phase" argument this row already made, carried one step further to
+> include Crescent/Gibbous/Disseminating/Balsamic. `include_quarter_moons` is kept as a
+> deprecated alias (`true` → `"quarters"`, `false` → `"syzygy"`); the volume-sanity figure below
+> ("~12 lunations with quarters") is accordingly ~24 under the current default. See
+> `docs/SUP-360-eight-phase-lunation-spec.md` §5 and the README's `lunation_phases` entry for the
+> current behavior.
+
 **Volume sanity check** at these defaults — `DAY_CHART`, 90 years, 17 natal targets, 5 major
 aspects, 1° orb: ~282 progressed-Moon contacts, ~21 each from Sun and Mercury, ~15 from Mars,
 ~20–30 each from progressed ASC and MC; 39 Moon sign ingresses, 3 Sun; ~39 Moon house
