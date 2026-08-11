@@ -460,7 +460,10 @@ test('§7.1/§7.2 eight_phase is a superset of quarters, and Crescent/Balsamic +
     sunProvider: providerFor('Sun'), moonProvider: providerFor('Moon'), startJd, endJd, lunationPhases: 'eight_phase',
   });
 
-  assert.equal(eightPhase.length, quarters.length * 2);
+  // Not an exact x2: a bounded window's partial cycle at the edge can contribute fewer
+  // than 8 phase starts while still contributing 2 quarters (spec §7.4 pins 99, not 100,
+  // for this exact 2026 window). The superset loop below carries the real invariant.
+  assert.ok(eightPhase.length > quarters.length);
   for (const q of quarters) {
     const match = eightPhase.find((e) => e.phase === q.phase && e.datetime === q.datetime);
     assert.ok(match, `expected quarters event ${q.phase}@${q.datetime} to appear unchanged in eight_phase`);

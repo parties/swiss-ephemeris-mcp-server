@@ -496,10 +496,15 @@ test('§7.3 include_minor does not gate the lunation phase set (guards §6.1 cor
   const server = new SwissEphemerisServer();
   const window = { ...DAY_INPUT, window_start: '2026-01-01T00:00:00Z', window_end: '2027-01-01T00:00:00Z', event_types: ['lunation'] };
 
+  // Project to {phase, datetime}: which phases are emitted must not vary with include_minor
+  // (§6.1 corollary), but natal_contacts legitimately gains minor-aspect entries and is out
+  // of scope for this guard - that's resolveAspectSettings behaving as designed, not a bug.
+  const project = (events) => events.map((e) => ({ phase: e.phase, datetime: e.datetime }));
+
   for (const lunation_phases of ['syzygy', 'quarters', 'eight_phase']) {
     const withMinor = await server.handleToolCall('find_events', { ...window, lunation_phases, include_minor: true });
     const withoutMinor = await server.handleToolCall('find_events', { ...window, lunation_phases, include_minor: false });
-    assert.deepEqual(withMinor.events, withoutMinor.events, `lunation_phases: "${lunation_phases}" must not vary with include_minor`);
+    assert.deepEqual(project(withMinor.events), project(withoutMinor.events), `lunation_phases: "${lunation_phases}" must not vary with include_minor`);
   }
 });
 
