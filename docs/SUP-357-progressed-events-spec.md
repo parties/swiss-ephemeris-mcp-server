@@ -79,7 +79,7 @@ Two consequences the implementer must handle:
 
 1. **Under `"progressed"` the cusps move, so this is a two-moving-body search.** SUP-349 Q1's
    monotonicity proof assumes a *fixed* target. Compose a relative provider over
-   `λ_body(t) − cusp_i(t)`, exactly as `relativeLunarProvider` (`lib/event-search.js:320`) does for
+   `λ_body(t) − cusp_i(t)`, exactly as `relativeLunarProvider` (`lib/event-search.js:345`) does for
    lunations — `scanTransitingBody` then segments at the stationary points of the *difference*,
    which is what Q1's scope note prescribes. No new code in the engine.
 
