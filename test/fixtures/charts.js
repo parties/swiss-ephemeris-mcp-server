@@ -139,6 +139,32 @@ export const NODE_DIVERGENCE_CHART = {
   },
 };
 
+/**
+ * SUP-359 review follow-up: high latitude (Svalbard), for exercising the progressed
+ * Ascendant's adaptive coarse-step subdivision (index.js adaptiveJdGrid) - its rate per
+ * degree of ARMC is unbounded near the poles, which no other fixture here gets close to
+ * (the highest, DAY_CHART/NIGHT_CHART, is 51.4769). `expected.progressions.ascendant` was
+ * computed via find_events' own progressed-Ascendant path (progressedAscendantLongitude in
+ * test/find-events-progressed.integration.test.js) and independently cross-checked against
+ * calculate_secondary_progressions at the same instant, agreeing to <1e-6deg - the same
+ * cross-tool identity §6.1 already establishes at DAY_CHART/PARTNER_CHART/SOUTHERN_CHART,
+ * extended here to a latitude the review flagged as untested.
+ */
+export const POLAR_CHART = {
+  label: 'polar chart (Svalbard)',
+  datetime: '1990-01-01T12:00:00Z',
+  latitude: 78.2232,
+  longitude: 15.6267,
+  expected: {
+    progressions: {
+      // elapsed years -> progressed Ascendant longitude, angle_method "solar_arc" (default)
+      ascendant10yr: 332.8454332222222,
+      ascendant32yr: 329.15207427777773,
+      ascendant60yr: 151.55307497222222,
+    },
+  },
+};
+
 // Not included in ALL_CHARTS: several test suites key fixed expectations (e.g. minimum
 // aspect counts) off ALL_CHARTS by fixture.label, and this fixture doesn't have entries
 // there. It's consumed directly by the house-system-invariance tests instead.
