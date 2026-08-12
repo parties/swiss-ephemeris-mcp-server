@@ -8,13 +8,15 @@ enforcement layers, and they are not equivalent:
 - **Local commit hook** (`.husky/commit-msg`, config in `commitlint.config.js`, extends
   `@commitlint/config-conventional`) runs `pnpm exec commitlint --edit "$1"` on every commit made
   in a clone with husky installed (`pnpm install` runs `prepare: husky`). This is convenience /
-  fast feedback only — it only fires locally, and can be skipped with `git commit --no-verify`
-  (useful for WIP commits). Nothing enforces commit subject format at commit time in CI.
+  fast feedback only — it only fires locally, and can be skipped with `git commit --no-verify`.
+  Nothing enforces commit subject format at commit time in CI. Note that this repo merges with
+  merge commits rather than squashing, so branch commits land on `main` verbatim — a bypassed
+  message stays in the history.
 - **PR title** is the layer that's actually CI-enforced. `.github/workflows/pr-title-lint.yml`
   runs `amannn/action-semantic-pull-request@v6` on PR open/edit/synchronize and requires the PR
-  title itself to be a valid Conventional Commit subject. This matters because this repo uses
-  squash-merge, so the PR title becomes the commit subject on `main` — and that's what
-  semantic-release reads to decide the next version.
+  title itself to be a valid Conventional Commit subject. This matters because the repo is
+  configured with `merge_commit_title=PR_TITLE`, so the PR title becomes the merge commit subject
+  on `main` — and that's what semantic-release reads to decide the next version.
 
 Example valid subjects:
 

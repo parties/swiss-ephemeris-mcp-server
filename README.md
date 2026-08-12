@@ -410,11 +410,11 @@ An unknown value returns an `InvalidParams` error listing the valid codes.
 
 Commit messages are linted against [Conventional Commits](https://www.conventionalcommits.org/) (`@commitlint/config-conventional`) via a husky `commit-msg` hook, e.g. `fix: ...`, `feat: ...`, `chore: ...`, `docs: ...`. The hook installs automatically on `npm install`/`npm ci` (`prepare: husky`) and runs `pnpm exec commitlint --edit` against each commit message.
 
-For WIP or otherwise non-conforming commits, bypass the hook with `git commit --no-verify`.
+The hook can be bypassed with `git commit --no-verify`, but prefer not to: this repo integrates with merge commits rather than squashing, so branch commits land on `main` verbatim and a bypassed message stays in the history.
 
-PR titles are also checked in CI against Conventional Commits (`.github/workflows/pr-title-lint.yml`, via `amannn/action-semantic-pull-request`), since this repo squash-merges with the PR title as the resulting commit message — a non-conforming title will fail the check even if the individual commits are fine.
+PR titles are also checked in CI against Conventional Commits (`.github/workflows/pr-title-lint.yml`, via `amannn/action-semantic-pull-request`). The repo is configured with `merge_commit_title=PR_TITLE`, so the PR title becomes the merge commit subject on `main` — a non-conforming title will fail the check even if the individual commits are fine.
 
-This is what makes releases automatic (see [Releases](#releases) below): every commit that lands on `main` has a Conventional Commits type, and [semantic-release](https://semantic-release.gitbook.io/) reads that history to decide the next version.
+This is what makes releases automatic (see [Releases](#releases) below): every PR that lands on `main` contributes a merge commit whose subject carries a Conventional Commits type, and [semantic-release](https://semantic-release.gitbook.io/) reads that history to decide the next version.
 
 ## Releases
 
