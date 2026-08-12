@@ -408,7 +408,7 @@ An unknown value returns an `InvalidParams` error listing the valid codes.
 
 ## Contributing
 
-Commit messages are linted against [Conventional Commits](https://www.conventionalcommits.org/) (`@commitlint/config-conventional`) via a husky `commit-msg` hook, e.g. `fix: ...`, `feat: ...`, `chore: ...`, `docs: ...`. The hook installs automatically on `npm install`/`npm ci` (`prepare: husky`) and runs `pnpm exec commitlint --edit` against each commit message.
+Commit messages are linted against [Conventional Commits](https://www.conventionalcommits.org/) (`@commitlint/config-conventional`) via a husky `commit-msg` hook, e.g. `fix: ...`, `feat: ...`, `chore: ...`, `docs: ...`. The hook installs automatically on `npm install`/`npm ci` (`prepare: husky`) and runs `npx --no-install commitlint --edit` against each commit message.
 
 The hook can be bypassed with `git commit --no-verify`, but prefer not to: this repo integrates with merge commits rather than squashing, so branch commits land on `main` verbatim and a bypassed message stays in the history.
 
