@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { calculateNatalAspects, calculateCrossChartAspects, DEFAULT_ORBS } from '../lib/aspects.js';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { SwissEphemerisServer } from '../index.js';
+import { DAY_CHART, PARTNER_CHART } from './fixtures/charts.js';
 
 test('calculateCrossChartAspects matches calculateNatalAspects orb table for the same body pair', () => {
   const a = { name: 'A', longitude: 0, speed: 0.5 };
@@ -116,5 +117,37 @@ test('calculateSynastryAspects throws McpError for an unknown body in bodies', (
   assert.throws(
     () => server.calculateSynastryAspects({}, {}, { bodies: ['NotARealBody'] }),
     (err) => err instanceof McpError && /Unknown body: NotARealBody/.test(err.message)
+  );
+});
+
+const SYNASTRY_INPUT = {
+  person1_datetime: DAY_CHART.datetime,
+  person1_latitude: DAY_CHART.latitude,
+  person1_longitude: DAY_CHART.longitude,
+  person2_datetime: PARTNER_CHART.datetime,
+  person2_latitude: PARTNER_CHART.latitude,
+  person2_longitude: PARTNER_CHART.longitude,
+};
+
+test('calculate_synastry rejects an unknown orb_model', async () => {
+  const server = new SwissEphemerisServer();
+  await assert.rejects(
+    () => server.handleToolCall('calculate_synastry', { ...SYNASTRY_INPUT, orb_model: 'bogus' }),
+    (err) => err instanceof McpError && /orb_model must be one of/.test(err.message)
+  );
+});
+
+// The bad orb_model has to win over the override keys it invalidates (SUP-384): an MCP
+// caller is usually a model, so the error message is the input to its next attempt, and
+// naming orb_overrides here sends it to retry the one parameter it got right.
+test('calculate_synastry reports an unknown orb_model even when orb_overrides are present', async () => {
+  const server = new SwissEphemerisServer();
+  await assert.rejects(
+    () => server.handleToolCall('calculate_synastry', {
+      ...SYNASTRY_INPUT,
+      orb_model: 'bogus',
+      orb_overrides: { moieties: { Sun: 8 } },
+    }),
+    (err) => err instanceof McpError && /orb_model must be one of/.test(err.message)
   );
 });

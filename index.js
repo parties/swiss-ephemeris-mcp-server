@@ -2699,6 +2699,12 @@ class SwissEphemerisServer {
           throw new McpError(ErrorCode.InvalidParams, 'orb_overrides must be an object');
         }
 
+        // Before the override keys, not after: which model is in force decides which
+        // override SHAPE is legal, so an unrecognised orb_model falls through
+        // invalidOrbOverrideKeys' class-mode branch and reports a valid override as the
+        // bad parameter (SUP-384). Same order as find_events.
+        validateOrbModel(synastry_orb_model);
+
         if (synastry_orb_overrides !== undefined) {
           const invalidSynastryOrbKeys = invalidOrbOverrideKeys(synastry_orb_overrides, synastry_orb_model);
           if (invalidSynastryOrbKeys.length) {
@@ -2706,7 +2712,6 @@ class SwissEphemerisServer {
           }
         }
 
-        validateOrbModel(synastry_orb_model);
         const validatedSynastryNodeType = validateNodeType(synastry_node_type);
 
         if (!person1_datetime || typeof person1_datetime !== 'string') {
