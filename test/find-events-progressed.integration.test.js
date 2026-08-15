@@ -405,6 +405,56 @@ test('§6.4 progressed Jupiter->natal Sun: absent under the fixed default, a lif
   assert.equal(moiety.contacts[0].leaves_orb_truncated, true);
 });
 
+// SUP-383: 'fixed' takes its own early-return branch in invalidOrbOverrideKeys (flat aspect
+// names only, no class/moiety nesting), and until now nothing exercised orb_overrides against
+// it at a tool boundary at all - the two tests below close that gap on the surface that has
+// shipped 'fixed' the longest. They deliberately reuse §6.4's window: progressed Jupiter has
+// no contact to natal Sun under the 1-degree default, so any contact here is the override's.
+test('§6.4 orb_model "fixed" honors a flat orb_overrides widening at the find_events boundary', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const window = {
+    birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
+    window_start: DAY_CHART.datetime, window_end: '2080-01-01T00:00:00Z',
+    rate: 'secondary_progression', bodies: ['Jupiter'], targets: ['Sun'], include_angles: false, event_types: ['aspect'],
+    orb_model: 'fixed',
+  };
+
+  const baseline = await server.handleToolCall('find_events', window);
+  assert.deepEqual(baseline.contacts, [], 'sanity: nothing at all survives the unmodified 1-deg fixed table here');
+
+  const widened = await server.handleToolCall('find_events', {
+    ...window,
+    orb_overrides: { conjunction: 10, opposition: 10, trine: 10, square: 10, sextile: 10 },
+  });
+  assert.ok(widened.contacts.length > 0, 'a flat orb_overrides widening must reach the fixed table');
+  assert.ok(
+    widened.contacts.every((c) => c.orb_allowed === 10),
+    'a flat override under "fixed" applies one orb to every pair - there is no per-body or per-class resolution to fall back to'
+  );
+  assert.equal(widened.settings_used.orb_model, 'fixed');
+});
+
+test('§6.4 orb_model "fixed" rejects both an unknown flat aspect name and the per-class nested shape', { skip: !HAS_SWETEST }, async () => {
+  const server = new SwissEphemerisServer();
+  const window = {
+    birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
+    window_start: DAY_CHART.datetime, window_end: '2080-01-01T00:00:00Z',
+    rate: 'secondary_progression', bodies: ['Jupiter'], targets: ['Sun'], include_angles: false, event_types: ['aspect'],
+    orb_model: 'fixed',
+  };
+
+  await assert.rejects(
+    () => server.handleToolCall('find_events', { ...window, orb_overrides: { notAnAspect: 1 } }),
+    /Unknown aspect in orb_overrides: notAnAspect/
+  );
+  // 'fixed' has no orb class to nest under, so the shape 'class' accepts is an error here
+  // rather than a silently-ignored key.
+  await assert.rejects(
+    () => server.handleToolCall('find_events', { ...window, orb_overrides: { angle: { square: 4 } } }),
+    /Unknown aspect in orb_overrides: angle/
+  );
+});
+
 // --- §6.5 Birth-time sensitivity -------------------------------------------------------------
 
 test('§6.5 DAY_CHART/SOUTHERN_CHART: 4-minute Ascendant/Midheaven shift matches the spec', { skip: !HAS_SWETEST }, async () => {

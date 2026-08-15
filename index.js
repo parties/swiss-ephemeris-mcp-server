@@ -759,8 +759,13 @@ class SwissEphemerisServer {
                 },
                 orb_overrides: {
                   type: 'object',
-                  description: 'Per-aspect orb overrides in degrees for aspects_to_natal, e.g. {"conjunction": 10}. Also accepts a per-class shape to move only one orb class, e.g. {"angle": {"square": 4}} or {"derived": {"square": 2}}. The default orb tables (see calculate_transits\' orb_model description) are transit-scaled; the conventional orb for progressed aspects is tighter, around 1 degree, so callers doing serious progressions work will usually want to tighten these rather than use the defaults as-is.',
+                  description: 'Per-aspect orb overrides in degrees for aspects_to_natal. The accepted SHAPE depends on `orb_model`. Under the default "fixed" (and under "class"), flat aspect-name keys, e.g. {"conjunction": 10}. Under "class" only, also a per-class shape to move a single orb class, e.g. {"orb_model": "class", "orb_overrides": {"angle": {"square": 4}}} or {"derived": {"square": 2}} - "fixed" has no per-class concept to nest under, so the nested form errors there. Under "moiety", the disjoint two-knob shape instead: {"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}. The default table is already the tight 1 degree / 0.5 degree progressed-scale one, so overrides here are usually about a specific aspect rather than about rescaling the whole chart.',
                   additionalProperties: { type: ['number', 'object'] },
+                },
+                orb_model: {
+                  type: 'string',
+                  enum: ['class', 'moiety', 'fixed'],
+                  description: 'Orb resolution model for aspects_to_natal. "fixed" (default) is a flat 1 degree for major aspects / 0.5 degrees for minors, independent of which bodies/points are involved - matching find_events at rate "secondary_progression", and tighter than every other tool here, whose defaults are transit-scaled. At the progressed rate a transit-scaled orb keeps an outer-planet contact "in orb" for centuries, which is not a tuning preference but meaningless output. "moiety" (the pre-2.0.0 behaviour of this tool) sums each body\'s half-orb and scales by the aspect\'s multiplier; "class" uses the fixed per-class tables. See calculate_transits\' orb_model description for those two formulas. Echoed back as `orb_model_used`, and it also selects which `orb_overrides` shape is accepted.',
                 },
               },
               required: ['birth_datetime', 'birth_latitude', 'birth_longitude', 'target_date'],
@@ -1576,6 +1581,7 @@ class SwissEphemerisServer {
       include_minor,
       include_angles,
       orb_overrides,
+      orb_model,
     } = args;
 
     if (!birth_datetime || typeof birth_datetime !== 'string') {
@@ -1616,6 +1622,26 @@ class SwissEphemerisServer {
     const validatedHouseSystem = validateHouseSystem(house_system);
     const validatedAngleMethod = validateAngleMethod(angle_method);
     const validatedHouseFrame = validateHouseFrame(house_frame);
+    validateOrbModel(orb_model);
+    // 'fixed' rather than the aspect engine's own 'moiety' default (SUP-383), matching
+    // find_events at rate "secondary_progression": the moiety/class tables are transit-scaled,
+    // and at the progressed rate a 12-degree moiety orb keeps a progressed Jupiter contact
+    // "in orb" for centuries - see docs/SUP-357-progressed-events-spec.md and the Orb Models
+    // section of the README. Which model is resolved also decides which orb_overrides SHAPE is
+    // accepted (flat aspect names under 'fixed', + per-class nesting under 'class', the
+    // two-knob {moieties, multipliers} form under 'moiety'), so it has to be settled before
+    // any override key is validated.
+    const orbModel = orb_model ?? 'fixed';
+    const orbOverrides = orb_overrides ?? {};
+
+    // Validated here rather than left to resolveAspectBodies below, which runs after all three
+    // calculateEphemeris calls - a rejected override should not cost a full ephemeris run. The
+    // check inside resolveAspectBodies stays as the shared backstop for its other callers.
+    const invalidOrbKeys = invalidOrbOverrideKeys(orbOverrides, orbModel);
+    if (invalidOrbKeys.length) {
+      throw new McpError(ErrorCode.InvalidParams, `Unknown aspect in orb_overrides: ${invalidOrbKeys[0]}`);
+    }
+
     const includeMinor = include_minor ?? false;
     const includeAngles = include_angles ?? true;
     const requestedBodies = this.resolveSynastryBodies(bodies);
@@ -1672,7 +1698,8 @@ class SwissEphemerisServer {
     const { bodiesWithLonSpeed: natalBodies } = this.resolveAspectBodies(natalChart, {
       includeAngles,
       bodies: requestedBodies,
-      orbOverrides: orb_overrides,
+      orbOverrides,
+      orbModel,
     });
     const frozenNatalBodies = natalBodies.map((b) => ({ ...b, speed: b.speed == null ? null : 0 }));
 
@@ -1688,7 +1715,8 @@ class SwissEphemerisServer {
 
     const aspectsToNatal = calculateCrossChartAspects(progressedBodies, frozenNatalBodies, {
       includeMinor,
-      orbOverrides: orb_overrides,
+      orbOverrides,
+      orbModel,
     }).map((a) => ({
       progressed_body: a.body_a,
       natal_body: a.body_b,
@@ -1708,6 +1736,7 @@ class SwissEphemerisServer {
       progressed_angles: progressedAngles,
       angle_method_used: validatedAngleMethod,
       house_frame_used: validatedHouseFrame,
+      orb_model_used: orbModel,
       aspects_to_natal: aspectsToNatal,
       natal_chart: natalChart,
       ephemeris_version: getEphemerisVersion(),
