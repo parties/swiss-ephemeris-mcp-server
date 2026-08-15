@@ -11,13 +11,18 @@ const EPHE_PATH = resolveEphePath();
 const HAS_SWETEST = swetestAvailable(EPHE_PATH);
 
 // SUP-385: opt-in, because these are the most expensive tests in the repo by two orders of
-// magnitude. A pair search bisects to JD_TOLERANCE (50ms) for every crossing of every
-// aspect angle, and each bisection sample calls the relative provider's positionAt, which
-// spawns swetest once per body - synchronously, via execSync. Measured on this file's
-// standard 90-year progressed window: 61,150 swetest spawns and ~8.6 minutes for a SINGLE
-// pair, and most tests below run the 10-pair progressed default or the 21-pair transit
-// default. The whole file is hours, which is not a wall clock `npm test` can carry as a
-// gate, so it is skipped unless asked for: `npm run test:slow`, or RUN_SLOW_TESTS=1.
+// magnitude. A pair search samples the whole window and bisects to JD_TOLERANCE (50ms) for
+// every crossing of every aspect angle, and each sample calls the relative provider's
+// positionAt, which spawns swetest once per body - synchronously, via execSync. Measured on
+// this file's standard 90-year progressed window: 61,150 swetest spawns and ~5.2 minutes
+// for a single pair.
+//
+// The cost is driven by the WINDOW, not the pair count - swetest is spawned per body per
+// sample, so the 10-pair default costs 6.7 min against that same 5.2 (and 3 pairs yielding
+// one episode still cost 5.1). include_minor is worth ~2.5x. Summed over the tests below
+// that is ~1.5-2h, which is not a wall clock `npm test` can carry as a gate, so the file is
+// skipped unless asked for: `npm run test:slow`, or RUN_SLOW_TESTS=1. Per-config timings
+// and provenance are in CONTRIBUTING.md.
 //
 // This is a quarantine, not a diagnosis of a broken test - nothing here hangs, it is
 // arithmetically that slow. Drop the gate once the pair search stops spawning a process

@@ -13,7 +13,7 @@
     "dev": "node --watch index.js",
     "dev:http": "MCP_HTTP_MODE=true node --watch index.js",
     "test": "node scripts/run-tests.mjs",
-    "test:slow": "RUN_SLOW_TESTS=1 TEST_WALL_CLOCK_MS=10800000 TEST_TIMEOUT_MS=0 node scripts/run-tests.mjs",
+    "test:slow": "RUN_SLOW_TESTS=1 TEST_WALL_CLOCK_MS=0 TEST_TIMEOUT_MS=0 node scripts/run-tests.mjs",
     "prepare": "husky"
   },
   "dependencies": {
