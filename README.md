@@ -207,7 +207,16 @@ This exists because the angles of a plain `calculate_planetary_positions` call a
 - `bodies` (array of strings, optional): Override the default body list (defaults to the same list as `calculate_transits`: Sun..Pluto, North Node, Lilith, Chiron, Ceres, Pallas, Juno, Vesta). Applies to `progressed_planets` and the progressed side of `aspects_to_natal`.
 - `include_minor` (boolean, optional): Include minor aspects in `aspects_to_natal`. Default `false`.
 - `include_angles` (boolean, optional): Include progressed Ascendant/Midheaven as aspectable bodies on the progressed side of `aspects_to_natal`, and natal Ascendant/Midheaven/Part of Fortune on the natal side. Default `true` — unlike `calculate_transits`/`calculate_synastry`, this defaults on: progressed angle contacts are this tool's headline output, and unlike a transiting Ascendant (which sweeps the whole zodiac daily and means nothing), the progressed Ascendant/Midheaven stay meaningful. Progressed Part of Fortune is never included on the progressed side regardless of this flag — which day/night formula applies to a progressed sect is unsettled.
-- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees for `aspects_to_natal`, e.g. `{"conjunction": 10}`. Also accepts the per-class shape (`{"angle": {...}}` / `{"derived": {...}}`) described under `calculate_transits` above. The default orb tables are transit-scaled; the conventional orb for progressed aspects is tighter, around 1 degree, so callers doing serious progressions work will usually want to tighten these.
+- `orb_model` (string, optional): `"fixed"` (default), `"moiety"`, or `"class"` — how a pair's allowed orb is derived for `aspects_to_natal`. See [Orb Models](#orb-models). The default is `"fixed"` (a flat 1° for majors, 0.5° for minors), matching `find_events` at `rate: "secondary_progression"` and unlike every other tool here, whose defaults are transit-scaled: at the progressed rate a moiety orb keeps an outer-planet contact "in orb" for centuries. `"moiety"` restores the pre-2.0.0 output of this tool. Echoed back as `orb_model_used`. An unrecognized value throws `InvalidParams` rather than silently defaulting.
+- `orb_overrides` (object, optional): Per-aspect orb overrides in degrees for `aspects_to_natal`. **The accepted shape depends on `orb_model`**, and a shape from the wrong model throws `InvalidParams` rather than being ignored:
+
+  | `orb_model` | Accepted `orb_overrides` shape |
+  |---|---|
+  | `"fixed"` (default) | Flat aspect names only — `{"conjunction": 10}` |
+  | `"class"` | Flat, plus per-class — `{"angle": {"square": 4}}`, `{"derived": {"square": 2}}` |
+  | `"moiety"` | The disjoint two-knob form — `{"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}` |
+
+  So the per-class example above requires `orb_model: "class"`; under the default it correctly throws. Since the default table is already the tight progressed-scale one, an override here is usually about a single aspect rather than about rescaling the whole chart.
 
 **Returns:**
 - `progressed_datetime`: The birth-plus-elapsed-years instant actually used
@@ -216,7 +225,7 @@ This exists because the angles of a plain `calculate_planetary_positions` call a
 - `progressed_planets`: `{ <body>: { longitude, sign, degree, speed, retrograde } }` for the requested bodies. `retrograde` is surfaced explicitly rather than left for callers to infer from the sign of `speed`.
 - `progressed_houses`: The 12 house cusps selected by `house_frame`
 - `progressed_angles`: `{ Ascendant, Midheaven, IC, Descendant }`, always the arc-directed progressed values
-- `angle_method_used`, `house_frame_used`: The resolved settings actually applied
+- `angle_method_used`, `house_frame_used`, `orb_model_used`: The resolved settings actually applied
 - `aspects_to_natal`: Array of aspects from the progressed bodies to the natal chart. Each entry has `progressed_body`, `natal_body`, `aspect`, `category`, `orb`, `exact_angle`, `applying`. Unlike `calculate_transits`/`calculate_synastry`, `orb` and `exact_angle` are numbers, not `.toFixed(2)` strings.
 - `natal_chart`: Complete birth chart data, same shape as `calculate_transits`' `natal_chart`, for diffing
 - `ephemeris_version`: `<package name>@<version>[+<git short sha>]` of the server that produced the result
@@ -355,7 +364,7 @@ A pair can report *both* a parallel and a contraparallel at once — that happen
 
 - **`moiety` (default for most tools):** each body/point has its own half-orb ("moiety"). A pair's orb is `(moietyA + moietyB) * multiplier[aspect]` — e.g. Sun (7.5°) conjunct Moon (6°) allows (7.5+6)×1.0 = 13.5°. `orb_overrides` in this mode takes a different two-knob shape instead of the `class`-mode shape: `{"moieties": {"Sun": 8}, "multipliers": {"quincunx": 0.3}}` — `moieties` keys are body/point names, `multipliers` keys are aspect names.
 - **`class`:** a fixed per-class orb table (`body`/`angle`/`derived`, shown per-tool above), independent of which two bodies are involved. `orb_overrides` in this mode takes the flat (`{"conjunction": 10}`) or per-class (`{"angle": {"square": 4}}`) shape.
-- **`fixed`** (`find_events` only, default there at `rate: "secondary_progression"`): a single flat orb per aspect — 1° for conjunction/opposition/trine/square/sextile, 0.5° for the minors — independent of which bodies/points are involved, no per-class distinction at all. `orb_overrides` in this mode takes only the flat shape (`{"conjunction": 0.5}`), since there's no class to nest under. This exists because `moiety`/`class` are both scaled for transit-speed volume: a moiety-orb progressed Jupiter contact to a natal point can stay "in orb" for centuries, which isn't a tuning preference at the progressed rate, it's meaningless output.
+- **`fixed`** (the progressed default, and offered only on the two progressed surfaces — `find_events` at `rate: "secondary_progression"`, and `calculate_secondary_progressions`, which is always progressed and so defaults to it unconditionally): a single flat orb per aspect — 1° for conjunction/opposition/trine/square/sextile, 0.5° for the minors — independent of which bodies/points are involved, no per-class distinction at all. `orb_overrides` in this mode takes only the flat shape (`{"conjunction": 0.5}`), since there's no class to nest under. This exists because `moiety`/`class` are both scaled for transit-speed volume: a moiety-orb progressed Jupiter contact to a natal point can stay "in orb" for centuries, which isn't a tuning preference at the progressed rate, it's meaningless output.
 
 Under `moiety`, luminary-to-angle conjunctions widen noticeably versus `class` — e.g. Sun opposition Sun in synastry goes from an 8° orb to 15°. This is expected under the moiety formula (Sun's 7.5° moiety on both sides, ×1.0 multiplier), not a bug.
 
