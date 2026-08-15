@@ -1,5 +1,51 @@
 # Contributing
 
+## Running the tests
+
+```bash
+npm test          # the gate: ~6m15s, self-terminating
+npm run test:slow # everything, including the quarantine: hours
+```
+
+**Budget six to seven minutes for `npm test`.** Measured on an M-series Mac, 2026-08-15: `6m15s`
+wall clock, 398 tests, 382 pass, 16 skipped, exit 0. The slowest single test is ~82s (an eclipse
+window search) — nothing here is instant, because almost every integration test shells out to
+`swetest` for real ephemeris data rather than using a recorded fixture.
+
+`npm test` runs through `scripts/run-tests.mjs` rather than calling `node --test` directly, because
+`node --test` alone cannot fail a hung run in this repo. Two independent bounds are needed
+(SUP-385):
+
+| Bound | Env var | Default | Catches |
+|---|---|---|---|
+| per-test | `TEST_TIMEOUT_MS` | `300000` | a test awaiting something that never settles |
+| whole run | `TEST_WALL_CLOCK_MS` | `1200000` | a test that blocks without ever yielding |
+
+The second is not redundant. `--test-timeout` is a timer *inside* the test process, so it only fires
+when the event loop turns — and every `swetest` call in this repo goes through `execSync`
+(`lib/ephemeris-series.js`), so a runaway search blocks the loop outright and that timer never runs.
+Verified: a test that busy-loops for 20s passes clean under `--test-timeout=2000`. Only killing the
+process from outside catches that shape. Both defaults are roughly 3× the measured figures above;
+set either to `0` to disable it.
+
+(`node --test` does exit `1` when a test is *cancelled* rather than failed, so a per-test timeout
+surfaces as a red run with no extra handling. Beware measuring this through a pipe — `node --test … |
+tail` reports `tail`'s exit status, not node's.)
+
+### The pair-aspect quarantine
+
+`test/find-events-pair-aspects.integration.test.js` is **skipped by default** and runs only under
+`RUN_SLOW_TESTS=1`. It is not broken and it does not hang — it is arithmetically enormous. A single
+pair over its standard 90-year progressed window measures at **61,150 `swetest` process spawns and
+~8.6 minutes**, and most of its 16 quarantined tests run the 10-pair progressed default or the
+21-pair transit default. The whole file has never been observed to finish; attempts have been
+abandoned at 42 minutes and at 1h56m.
+
+So **a green `npm test` says nothing about `include_pair_aspects`.** If you touch the pair path in
+`index.js` or `lib/event-search.js`, run `npm run test:slow` and budget hours for it. Whichever of
+the two you ran, say which one when you report a result. SUP-387 tracks making this fast enough to
+un-quarantine; the skip and this section go away together.
+
 ## Commit convention
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/). There are two

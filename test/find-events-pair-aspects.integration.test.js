@@ -10,6 +10,25 @@ import { resolveEphePath, swetestAvailable } from './fixtures/ephe-path.js';
 const EPHE_PATH = resolveEphePath();
 const HAS_SWETEST = swetestAvailable(EPHE_PATH);
 
+// SUP-385: opt-in, because these are the most expensive tests in the repo by two orders of
+// magnitude. A pair search bisects to JD_TOLERANCE (50ms) for every crossing of every
+// aspect angle, and each bisection sample calls the relative provider's positionAt, which
+// spawns swetest once per body - synchronously, via execSync. Measured on this file's
+// standard 90-year progressed window: 61,150 swetest spawns and ~8.6 minutes for a SINGLE
+// pair, and most tests below run the 10-pair progressed default or the 21-pair transit
+// default. The whole file is hours, which is not a wall clock `npm test` can carry as a
+// gate, so it is skipped unless asked for: `npm run test:slow`, or RUN_SLOW_TESTS=1.
+//
+// This is a quarantine, not a diagnosis of a broken test - nothing here hangs, it is
+// arithmetically that slow. Drop the gate once the pair search stops spawning a process
+// per sample.
+const RUN_SLOW_TESTS = process.env.RUN_SLOW_TESTS === '1';
+const slow = !HAS_SWETEST
+  ? { skip: 'swetest unavailable' }
+  : RUN_SLOW_TESTS
+    ? {}
+    : { skip: 'slow pair search quarantined by SUP-385 - run with RUN_SLOW_TESTS=1' };
+
 const Y = TROPICAL_YEAR_DAYS;
 
 function assertCloseIso(actual, expected, toleranceSec = 2) {
@@ -47,7 +66,7 @@ const PHASE_TO_ASPECT = {
 
 // --- §9.1 The lunation identity - the headline test --------------------------------------
 
-test('§9.1 pair_contacts (Sun, Moon) majors reproduce every quarters lunation datetime to the second with the correct aspect mapping, 25 episodes / 25 passes', { skip: !HAS_SWETEST }, async () => {
+test('§9.1 pair_contacts (Sun, Moon) majors reproduce every quarters lunation datetime to the second with the correct aspect mapping, 25 episodes / 25 passes', slow, async () => {
   const server = new SwissEphemerisServer();
   const window = {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -97,7 +116,7 @@ test('§9.1 pair_contacts (Sun, Moon) majors reproduce every quarters lunation d
   assert.ok(majorEpisodes.every((c) => !c.enters_orb_truncated && !c.leaves_orb_truncated));
 });
 
-test('§9.1/§6.1 eight_phase identity: all 24 phase datetimes and aspect mappings reproduced to the second by pair_contacts with include_minor', { skip: !HAS_SWETEST }, async () => {
+test('§9.1/§6.1 eight_phase identity: all 24 phase datetimes and aspect mappings reproduced to the second by pair_contacts with include_minor', slow, async () => {
   const server = new SwissEphemerisServer();
   const window = {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -129,7 +148,7 @@ test('§9.1/§6.1 eight_phase identity: all 24 phase datetimes and aspect mappin
 
 // --- §9.2 Default progressed pair set counts ----------------------------------------------
 
-test('§9.2 default progressed pair_bodies (10 pairs) over 90yr: per-pair episode/pass counts', { skip: !HAS_SWETEST }, async () => {
+test('§9.2 default progressed pair_bodies (10 pairs) over 90yr: per-pair episode/pass counts', slow, async () => {
   const server = new SwissEphemerisServer();
   const result = await server.handleToolCall('find_events', {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -177,7 +196,7 @@ test('§9.2 default progressed pair_bodies (10 pairs) over 90yr: per-pair episod
 
 // --- §9.3 Empty is a correct answer ---------------------------------------------------------
 
-test('§9.3 Sun-Mars and Venus-Mars: zero major-aspect episodes over 90yr; nonzero with include_minor', { skip: !HAS_SWETEST }, async () => {
+test('§9.3 Sun-Mars and Venus-Mars: zero major-aspect episodes over 90yr; nonzero with include_minor', slow, async () => {
   const server = new SwissEphemerisServer();
   const window = {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -227,7 +246,7 @@ test('§9.3 Sun-Mars and Venus-Mars: zero major-aspect episodes over 90yr; nonze
 
 // --- §9.4 An episode with no pass, and a truncated one --------------------------------------
 
-test('§9.4 Mercury-Venus majors over 90yr: 2 episodes, 1 pass; the second is truncated with no exact pass', { skip: !HAS_SWETEST }, async () => {
+test('§9.4 Mercury-Venus majors over 90yr: 2 episodes, 1 pass; the second is truncated with no exact pass', slow, async () => {
   const server = new SwissEphemerisServer();
   const result = await server.handleToolCall('find_events', {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -259,7 +278,7 @@ test('§9.4 Mercury-Venus majors over 90yr: 2 episodes, 1 pass; the second is tr
 
 // --- §9.5 Structural rules -------------------------------------------------------------------
 
-test('§9.5 (Sun, Midheaven) never appears even when explicitly requested, at either angle_method; the solar_arc invariant holds', { skip: !HAS_SWETEST }, async () => {
+test('§9.5 (Sun, Midheaven) never appears even when explicitly requested, at either angle_method; the solar_arc invariant holds', slow, async () => {
   const server = new SwissEphemerisServer();
   for (const angle_method of ['solar_arc', 'naibod']) {
     const result = await server.handleToolCall('find_events', {
@@ -303,7 +322,7 @@ test('§9.5 (Sun, Midheaven) never appears even when explicitly requested, at ei
   }
 });
 
-test('§9.5 North Node never appears in a pair at any setting', { skip: !HAS_SWETEST }, async () => {
+test('§9.5 North Node never appears in a pair at any setting', slow, async () => {
   const server = new SwissEphemerisServer();
   const result = await server.handleToolCall('find_events', {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -315,6 +334,8 @@ test('§9.5 North Node never appears in a pair at any setting', { skip: !HAS_SWE
   assert.ok(result.settings_used.pairs_searched.every((p) => p.body_a !== 'North Node' && p.body_b !== 'North Node'));
 });
 
+// Not gated by `slow`: this one rejects in parameter validation, before any pair search
+// runs, so it costs nothing and keeps one assertion from this file in the default gate.
 test('§9.5 Part of Fortune is not a valid pair_bodies member (errors rather than silently doing nothing)', { skip: !HAS_SWETEST }, async () => {
   const server = new SwissEphemerisServer();
   await assert.rejects(
@@ -328,7 +349,7 @@ test('§9.5 Part of Fortune is not a valid pair_bodies member (errors rather tha
   );
 });
 
-test('§9.5 retrograde is per body, not per relative rate: reversing pair order changes no flag', { skip: !HAS_SWETEST }, async () => {
+test('§9.5 retrograde is per body, not per relative rate: reversing pair order changes no flag', slow, async () => {
   const server = new SwissEphemerisServer();
   const window = {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -362,7 +383,7 @@ test('§9.5 retrograde is per body, not per relative rate: reversing pair order 
   }
 });
 
-test('§9.5/§8.1 sign/degree on a pair pass match each body\'s own absolute longitude, not the separation\'s', { skip: !HAS_SWETEST }, async () => {
+test('§9.5/§8.1 sign/degree on a pair pass match each body\'s own absolute longitude, not the separation\'s', slow, async () => {
   const server = new SwissEphemerisServer();
   const result = await server.handleToolCall('find_events', {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -394,7 +415,7 @@ test('§9.5/§8.1 sign/degree on a pair pass match each body\'s own absolute lon
   assert.ok(Math.abs(pass.body_b.longitude) > 1);
 });
 
-test('§9.5 pair_bodies is independent of bodies: bodies:["Moon"] with default pair_bodies still returns all 10 pairs', { skip: !HAS_SWETEST }, async () => {
+test('§9.5 pair_bodies is independent of bodies: bodies:["Moon"] with default pair_bodies still returns all 10 pairs', slow, async () => {
   const server = new SwissEphemerisServer();
   const result = await server.handleToolCall('find_events', {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -407,7 +428,7 @@ test('§9.5 pair_bodies is independent of bodies: bodies:["Moon"] with default p
   assert.equal(result.settings_used.pairs_searched.length, 10);
 });
 
-test('§9.5 off by default: pair_contacts is empty without include_pair_aspects', { skip: !HAS_SWETEST }, async () => {
+test('§9.5 off by default: pair_contacts is empty without include_pair_aspects', slow, async () => {
   const server = new SwissEphemerisServer();
   const result = await server.handleToolCall('find_events', {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -420,7 +441,7 @@ test('§9.5 off by default: pair_contacts is empty without include_pair_aspects'
   assert.equal(result.settings_used.pairs_searched.length, 10);
 });
 
-test('§9.5 gated by event_types: include_pair_aspects true but event_types excludes "aspect" produces no pair_contacts', { skip: !HAS_SWETEST }, async () => {
+test('§9.5 gated by event_types: include_pair_aspects true but event_types excludes "aspect" produces no pair_contacts', slow, async () => {
   const server = new SwissEphemerisServer();
   const result = await server.handleToolCall('find_events', {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -432,7 +453,7 @@ test('§9.5 gated by event_types: include_pair_aspects true but event_types excl
 
 // --- §9.6 Transit rate -----------------------------------------------------------------------
 
-test('§9.6 transit rate: default pair_bodies (21 pairs), 2026 window, moiety orbs', { skip: !HAS_SWETEST }, async () => {
+test('§9.6 transit rate: default pair_bodies (21 pairs), 2026 window, moiety orbs', slow, async () => {
   const server = new SwissEphemerisServer();
   const result = await server.handleToolCall('find_events', {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -459,7 +480,7 @@ test('§9.6 transit rate: default pair_bodies (21 pairs), 2026 window, moiety or
 
 // --- §9.7 Southern hemisphere ------------------------------------------------------------------
 
-test('§9.7 SOUTHERN_CHART: default progressed pair set produces no negative-longitude or NaN separations', { skip: !HAS_SWETEST }, async () => {
+test('§9.7 SOUTHERN_CHART: default progressed pair set produces no negative-longitude or NaN separations', slow, async () => {
   const server = new SwissEphemerisServer();
   const result = await server.handleToolCall('find_events', {
     birth_datetime: SOUTHERN_CHART.datetime, latitude: SOUTHERN_CHART.latitude, longitude: SOUTHERN_CHART.longitude,
@@ -479,7 +500,7 @@ test('§9.7 SOUTHERN_CHART: default progressed pair set produces no negative-lon
 
 // --- Ruling F: transit-rate pairs, orb model inheritance --------------------------------------
 
-test('faster_body is echoed and matches the pair with the larger mean rate (Moon faster than Sun)', { skip: !HAS_SWETEST }, async () => {
+test('faster_body is echoed and matches the pair with the larger mean rate (Moon faster than Sun)', slow, async () => {
   const server = new SwissEphemerisServer();
   const result = await server.handleToolCall('find_events', {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
@@ -491,7 +512,7 @@ test('faster_body is echoed and matches the pair with the larger mean rate (Moon
   assert.ok(result.pair_contacts.every((c) => c.faster_body === 'Moon'));
 });
 
-test('Ascendant x Midheaven is eligible via explicit pair_bodies but excluded from the default set', { skip: !HAS_SWETEST }, async () => {
+test('Ascendant x Midheaven is eligible via explicit pair_bodies but excluded from the default set', slow, async () => {
   const server = new SwissEphemerisServer();
   const withoutAngles = await server.handleToolCall('find_events', {
     birth_datetime: DAY_CHART.datetime, latitude: DAY_CHART.latitude, longitude: DAY_CHART.longitude,
