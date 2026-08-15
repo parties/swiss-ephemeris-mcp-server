@@ -85,6 +85,18 @@ The same reasoning applies to git history: a follow-up commit that removes perso
 purge it from earlier commits. Purging requires a history rewrite and force-push, which is a
 decision for the repo owner, not something to do unprompted.
 
+## `npm test` does not run everything
+
+`test/find-events-pair-aspects.integration.test.js` is quarantined behind `RUN_SLOW_TESTS=1`
+(SUP-385) because a single pair search over its 90-year window costs ~61,000 synchronous `swetest`
+spawns. A green `npm test` therefore says nothing about `include_pair_aspects`. Touching the pair
+path in `index.js` or `lib/event-search.js` means running `npm run test:slow` and budgeting about
+two hours for it — say which of the two you ran when you report a result. Details and per-test
+timings: `CONTRIBUTING.md`.
+
+Note also that **no CI job runs tests at all** in this repo (SUP-386 tracks fixing that). A green
+check on a PR here means the PR *title* linted. Whoever reviews is relying on your quoted local run.
+
 ## Commit and PR title conventions
 
 Full human-oriented explanation: `CONTRIBUTING.md`. Reference block for agent use:
