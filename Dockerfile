@@ -23,11 +23,15 @@ RUN git clone https://github.com/aloistr/swisseph.git /tmp/swisseph && \
 # Copy package files
 COPY package*.json ./
 
-# Install Node.js dependencies
-RUN npm ci --only=production
+# Install Node.js dependencies. --ignore-scripts because the `prepare` script runs husky,
+# which is a devDependency and so is absent from a production install - without this the
+# build dies at `sh -c husky` with exit 127. Neither runtime dependency has an install script.
+RUN npm ci --omit=dev --ignore-scripts
 
-# Copy application code
+# Copy application code. index.js imports every module in lib/, so lib/ is not optional -
+# omitting it builds an image that dies on the first import with ERR_MODULE_NOT_FOUND.
 COPY index.js ./
+COPY lib/ ./lib/
 
 # Copy vendor directory with ephemeris data files
 COPY vendor/ ./vendor/
@@ -43,9 +47,14 @@ USER nodejs
 # Expose port for HTTP mode
 EXPOSE 8000
 
-# Health check
+# Health check. Only HTTP mode has something to probe, so the check is mode-aware: it hits
+# the /health route when MCP_HTTP_MODE=true and is a deliberate no-op otherwise. In stdio
+# mode the server owns no socket, so process liveness is the only signal there is - and
+# Docker already reports that by itself. The previous check ran `node -e console.log(...)`,
+# which passed no matter what the server was doing and duly reported this very image as
+# healthy while it was too broken to start at all.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD node -e "console.log('Health check passed')" || exit 1
+    CMD [ "$MCP_HTTP_MODE" != "true" ] || wget -qO- "http://127.0.0.1:${PORT:-8000}/health" > /dev/null || exit 1
 
 # Default to stdio mode, can be overridden with environment variables
 ENV MCP_HTTP_MODE=false

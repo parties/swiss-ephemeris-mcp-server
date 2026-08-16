@@ -443,13 +443,20 @@ Releases are automated with [semantic-release](https://semantic-release.gitbook.
 ## Docker
 
 ```bash
-# Build and run
+# Build and run in HTTP mode
 docker build -t swiss-ephemeris-mcp .
 docker run -p 8000:8000 -e MCP_HTTP_MODE=true swiss-ephemeris-mcp
 
 # Health check
 curl http://localhost:8000/health
+
+# Stdio mode (the image default)
+docker run -i --rm swiss-ephemeris-mcp
 ```
+
+The image's `HEALTHCHECK` probes `/health` only when `MCP_HTTP_MODE=true`. Stdio mode has no
+socket to probe, so the check is a deliberate no-op there and container liveness is the only
+signal available — Docker reports that on its own.
 
 ## Transport Modes
 
