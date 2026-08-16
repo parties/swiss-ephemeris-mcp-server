@@ -103,14 +103,18 @@ search, which runs the same either way. What drives cost is the **sample count o
 search**: window length, body count, target count and aspect count all multiply into it, and the
 pair branch is a small minority of the total.
 
-Four changes have since attacked that cost from different ends, and they compound: SUP-389 made
+Five changes have since attacked that cost from different ends, and they compound: SUP-389 made
 each spawn ~2.5× cheaper by dropping the `/bin/sh` wrapper (`lib/swetest-exec.js`); SUP-387 cut the
 number of spawns ~8× by memoizing the provider seam and replacing the crossing refinement's
 bisection ladder with a safeguarded Newton step; SUP-390 then batched the one bisection ladder
 SUP-387 deliberately left alone — station refinement — behind a new optional seam method,
 `samplesFrom(startJd, stepDays, count)`; SUP-391 removed the last non-refinement spawn, the
-orb-interval midpoint probe in `findContacts`, for another 1.3–1.45×. Wall clocks quoted anywhere
-against an older tree are stale in every direction — re-measure rather than scaling them.
+orb-interval midpoint probe in `findContacts`, for another 1.3–1.45×; SUP-393 halved the progressed
+**frame** handshake — two whole `calculateEphemeris` charts (four spawns, of which one datum was
+read and one entire call was dead) became two narrow `-po -house` reads in `lib/house-frame.js`,
+worth 1.14–1.35× on spawns and 1.17–1.51× on wall clock, at the progressed rate only. Wall clocks
+quoted anywhere against an older tree are stale in every direction — re-measure rather than scaling
+them.
 
 **The floor is now known, and it is the process, not the program (SUP-391).** A `swetest` spawn
 costs ~1.79 ms on an M-series Mac, of which ~1.61 ms is spent before any ephemeris is touched (a
@@ -122,6 +126,12 @@ has no persistent mode to exploit and a free one would buy ~10%; nothing in the 
 per root against a floor of 2. Further sample-count work is worth single-digit percent. The only
 remaining lever is deleting the process boundary — in-process libswe (**SUP-394**) — which is ~16×
 and a dependency/build/re-verification decision, not a patch. Full measurements: `CONTRIBUTING.md`.
+
+That paragraph was about the transit rate, and the progressed rate had one structural exception left
+when it was written: the progressed **frame** was not sample-count work at all but four spawns of
+pure overhead per uncached frame, ~40% of a progressed call. SUP-393 took it, and there is no
+equivalent left — after it, a progressed frame is two spawns and every one of them computes
+something the caller reads. So the floor argument now holds at both rates.
 
 **SUP-390 is also the cautionary tale about scaling an estimate instead of re-measuring.** It was
 filed predicting ~5× on `find_events` from "~24 bisection iterations, one spawn each". By the time

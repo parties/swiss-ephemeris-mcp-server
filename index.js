@@ -67,6 +67,7 @@ import {
   signAndDegree,
 } from './lib/event-search.js';
 import { progressedBodyProvider, progressedMcProvider, ephemerisJdForTarget } from './lib/progressed-provider.js';
+import { houseFrameAt } from './lib/house-frame.js';
 
 function validateOrbModel(orbModel) {
   if (orbModel !== undefined && !ORB_MODELS.includes(orbModel)) {
@@ -293,7 +294,7 @@ function validateEventTypes(value) {
 // the transiting-side (rate: "transit") provider. The progressed-rate real-body/MC
 // providers live in lib/progressed-provider.js (pure, no swetest call of their own beyond
 // what ephemeris-series.js already does); the progressed Ascendant/moving-cusp providers
-// below need an actual swetest -house lookup and so stay next to calculateEphemeris.
+// below need an actual swetest -house lookup, which lib/house-frame.js does.
 function transitProviderFor(body) {
   return {
     // See lib/progressed-provider.js's progressedBodyProvider for what this is: at the
@@ -370,7 +371,7 @@ function adaptiveJdGrid(startJd, endJd, stepDays, longitudeAt) {
 // Progressed Ascendant provider: goes through progressedFrameAt (computeFictitiousLongitude
 // under the hood, keeping its `+ natalLongitude` term) for longitude; speed is a central
 // numeric difference (h = 1 day of target time - safely larger than the ~6-minute plateau
-// calculateEphemeris's whole-second time truncation creates, so the difference is never
+// the frame read's whole-second time truncation creates, so the difference is never
 // spuriously zero). No analytic ASC speed formula exists the way MC has one via the Sun.
 function ascendantProviderFor(progressedFrameAt) {
   const lonAt = (jd) => progressedFrameAt(jd).ascendant;
@@ -2058,13 +2059,15 @@ class SwissEphemerisServer {
     // Progressed Midheaven/Ascendant/moving-cusp machinery (SUP-357/SUP-359 §4) - built
     // only when needed. mcProvider is pure arithmetic (lib/progressed-provider.js, reusing
     // the progressed Sun's own speed under solar_arc); the Ascendant and moving cusps need
-    // an actual swetest -house lookup (obliquity + ARMC + the fictitious-longitude trick
-    // computeFictitiousLongitude derives - see calculate_secondary_progressions, which
-    // this mirrors exactly), memoized per whole EPHEMERIS second since calculateEphemeris
-    // truncates to that resolution internally regardless (formatTimeToSwiss reads whole
-    // UTC seconds), so caching at that granularity loses no precision it didn't already
-    // have and collapses the nearby queries root refinement performs into a handful of
-    // actual swetest spawns.
+    // actual swetest -house lookups (obliquity + ARMC + the fictitious-longitude trick
+    // computeFictitiousLongitude derives - the same handshake
+    // calculate_secondary_progressions performs, through lib/house-frame.js's narrow read
+    // rather than two whole calculateEphemeris charts: of the four spawns those cost, one
+    // datum was read and one entire call was dead - SUP-393). Memoized per whole EPHEMERIS
+    // second, since the read truncates to that resolution internally regardless
+    // (formatTimeToSwiss reads whole UTC seconds), so caching at that granularity loses no
+    // precision it didn't already have and collapses the nearby queries root refinement
+    // performs into a handful of actual swetest spawns.
     let mcProvider = null;
     let ascProvider = null;
     let progressedFrameAt = null;
@@ -2084,17 +2087,17 @@ class SwissEphemerisServer {
         const bucketKey = Math.round(ephJd * 86400);
         if (frameCache.has(bucketKey)) return frameCache.get(bucketKey);
 
-        const progressedDatetimeIso = dateFromJd(ephJd).toISOString();
+        const progressedDate = dateFromJd(ephJd);
         const mcLongitude = mcProvider.positionAt(targetJd).longitude;
-        const progressedRaw = this.calculateEphemeris(progressedDatetimeIso, latitude, longitude, validatedHouseSystem);
+        const progressedRaw = houseFrameAt(progressedDate, latitude, longitude, validatedHouseSystem);
         const fictitiousLongitude = computeFictitiousLongitude({
           progressedMcLongitude: mcLongitude,
           obliquityDeg: progressedRaw.obliquity,
-          baseArmc: progressedRaw.chart_points.ARMC.longitude,
+          baseArmc: progressedRaw.armc,
           natalLongitude: longitude,
         });
-        const progressedFrame = this.calculateEphemeris(progressedDatetimeIso, latitude, fictitiousLongitude, validatedHouseSystem);
-        const frame = { ascendant: progressedFrame.chart_points.Ascendant.longitude, houses: progressedFrame.houses };
+        const progressedFrame = houseFrameAt(progressedDate, latitude, fictitiousLongitude, validatedHouseSystem);
+        const frame = { ascendant: progressedFrame.ascendant, houses: progressedFrame.houses };
         frameCache.set(bucketKey, frame);
         return frame;
       };
