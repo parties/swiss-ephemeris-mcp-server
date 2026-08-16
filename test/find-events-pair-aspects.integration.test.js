@@ -10,23 +10,29 @@ import { resolveEphePath, swetestAvailable } from './fixtures/ephe-path.js';
 const EPHE_PATH = resolveEphePath();
 const HAS_SWETEST = swetestAvailable(EPHE_PATH);
 
-// SUP-385: opt-in, because these are the most expensive tests in the repo by two orders of
-// magnitude. A pair search samples the whole window and bisects to JD_TOLERANCE (50ms) for
-// every crossing of every aspect angle, and each sample calls the relative provider's
-// positionAt, which spawns swetest once per body - synchronously, via execSync. Measured on
-// this file's standard 90-year progressed window: 61,150 swetest spawns and ~5.2 minutes
-// for a single pair.
+// SUP-385: opt-in, because these are the most expensive tests in the repo - every one of
+// them searches a 90-year progressed window, and each position sample is its own
+// synchronous `swetest` process spawn (lib/ephemeris-series.js, via lib/swetest-exec.js).
 //
-// The cost is driven by the WINDOW, not the pair count - swetest is spawned per body per
-// sample, so the 10-pair default costs 6.7 min against that same 5.2 (and 3 pairs yielding
-// one episode still cost 5.1). include_minor is worth ~2.5x. Summed over the tests below
-// that is ~1.5-2h, which is not a wall clock `npm test` can carry as a gate, so the file is
-// skipped unless asked for: `npm run test:slow`, or RUN_SLOW_TESTS=1. Per-config timings
-// and provenance are in CONTRIBUTING.md.
+// SUP-387 cut this file to ~11 minutes end to end, and it now finishes - which it had never
+// once been observed to do. That is still far too long a wall clock to gate `npm test` on
+// (36s today), so the quarantine stays: run it with `npm run test:slow`, or RUN_SLOW_TESTS=1.
+// Closing the remaining gap means removing the process spawn itself (a persistent swetest,
+// or libswe bindings), which is its own ticket - not a shorter window here.
+//
+// Correcting what this comment used to claim, because the numbers were attributed to the
+// wrong thing and someone will otherwise optimise the wrong code. It said "61,150 swetest
+// spawns ... for a single pair" and "the cost is driven by the WINDOW, not the pair count".
+// The 61,150 was the whole find_events call: measured against an `include_pair_aspects:
+// false` baseline, the pair branch is ~8% of it at the progressed rate and ~12% at the
+// transit rate, and the rest is the ordinary moving-to-natal contacts[] search - which runs
+// identically whether pairs are on or off, and which none of the tests below assert on.
+// Cost is the sample count of the WHOLE aspect search: window x moving bodies x natal
+// targets x aspect angles. Extra pairs looked free because pairs were never the expensive
+// part.
 //
 // This is a quarantine, not a diagnosis of a broken test - nothing here hangs, it is
-// arithmetically that slow. Drop the gate once the pair search stops spawning a process
-// per sample.
+// arithmetically that slow. Per-test timings and provenance: CONTRIBUTING.md.
 const RUN_SLOW_TESTS = process.env.RUN_SLOW_TESTS === '1';
 const slow = !HAS_SWETEST
   ? { skip: 'swetest unavailable' }
@@ -274,7 +280,17 @@ test('§9.4 Mercury-Venus majors over 90yr: 2 episodes, 1 pass; the second is tr
   const truncated = mercuryVenus.find((c) => c.passes.length === 0);
   assert.ok(truncated);
   assert.equal(truncated.leaves_orb_truncated, true);
-  assertCloseIso(truncated.enters_orb, '2079-01-23T03:09:55Z');
+  // 10s, not the default 2s, for the same reason §9.3's assertions carry 10s: this
+  // particular boundary is below the ephemeris's own resolution. Probed directly at this
+  // instant, the progressed Mercury-Venus separation is 0.002527 deg/day of target time,
+  // so one 1e-7 deg swetest print quantum is 3.4 SECONDS wide - the separation crosses the
+  // orb boundary as a staircase with 3.4-second treads, and which instant inside a tread
+  // gets reported is the root-finder's arbitrary tiebreak, not an astronomical fact.
+  // SUP-387's refiner picks a different point in that tread than SUP-361's bisection did
+  // (2079-01-23T03:10:00Z vs 03:09:55Z, 1.5 treads); the Astrology Advisor cleared exactly
+  // this class of divergence for exactly this pair in advance. Everything asserted around
+  // it - 2 episodes, 1 pass, the closest-approach orb, the truncation flag - is unchanged.
+  assertCloseIso(truncated.enters_orb, '2079-01-23T03:09:55Z', 10);
   assert.ok(
     Math.abs(truncated.closest_approach.orb - 0.1523) < 1e-3,
     `expected closest_approach.orb ~0.1523, got ${truncated.closest_approach.orb}`

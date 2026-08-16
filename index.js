@@ -52,8 +52,9 @@ import {
   computeArcDegrees,
   computeFictitiousLongitude,
 } from './lib/progressions.js';
-import { jdFromDate, dateFromJd, seriesFor as ephemerisSeriesFor, positionAt as ephemerisPositionAt, eclipsesFor } from './lib/ephemeris-series.js';
+import { jdFromDate, dateFromJd, seriesFor as ephemerisSeriesFor, positionAt as ephemerisPositionAt, positionsAt as ephemerisPositionsAt, eclipsesFor } from './lib/ephemeris-series.js';
 import {
+  memoizeProvider,
   scanTransitingBody,
   findContacts,
   findStations,
@@ -255,7 +256,7 @@ const EVENT_SIGNS = [
 ];
 
 // A crossing's solved longitude sits within a fraction of an arcsecond of the exact
-// target it was solved for (bisection converges on time, not longitude, but even the
+// target it was solved for (the refinement converges on time, not longitude, but even the
 // fastest body - the Moon - moves only ~1e-6 deg over the remaining time tolerance). That
 // residual can fall on either side of a sign/house boundary, so which side floating point
 // happens to land on is not reliable for labelling. Nudging by a fixed, much larger
@@ -295,8 +296,40 @@ function validateEventTypes(value) {
 // below need an actual swetest -house lookup and so stay next to calculateEphemeris.
 function transitProviderFor(body) {
   return {
+    // See lib/progressed-provider.js's progressedBodyProvider for what this is: at the
+    // transit rate a provider's JD already IS the ephemeris JD and speed is already in
+    // degrees per day, so both maps are the identity.
+    batchSource: { body, ephemerisJdFor: (atJd) => atJd, scaleSpeed: (speed) => speed },
     seriesFor: (startJd, endJd, stepDays) => ephemerisSeriesFor(body, startJd, endJd, stepDays),
     positionAt: (atJd) => ephemerisPositionAt(body, atJd),
+  };
+}
+
+// One swetest spawn for both sides of a two-body pair instead of one each (SUP-387):
+// `-p` takes several body codes and prints a row per code at the same instant, and the two
+// sides of a real-body pair are sampled at the same instant by construction. The fetched
+// positions are primed into each provider's own memo (lib/event-search.js's
+// memoizeProvider), so the individual re-reads downstream - the per-pass absolute
+// longitude lookups in the pair block below, say - are cache hits rather than fresh spawns.
+//
+// Returns null unless both sides are plain real bodies memoized by the same search, which
+// is the caller's signal to just compose positionAt as before: a progressed Ascendant or
+// moving cusp is a house computation, not a `-p` body, and has no batched form.
+function pairPrefetchFor(providerA, providerB) {
+  const a = providerA.batchSource;
+  const b = providerB.batchSource;
+  if (!a || !b || !providerA.prime || !providerB.prime) return null;
+
+  return (jd) => {
+    // One side already sampled means the batch would save nothing - the other side alone
+    // is a single spawn either way.
+    if (providerA.isPrimed(jd) || providerB.isPrimed(jd)) return;
+    const ephemerisJd = a.ephemerisJdFor(jd);
+    if (ephemerisJd !== b.ephemerisJdFor(jd)) return;
+
+    const [rowA, rowB] = ephemerisPositionsAt([a.body, b.body], ephemerisJd);
+    providerA.prime(jd, { longitude: rowA.longitude, speed: a.scaleSpeed(rowA.speed) });
+    providerB.prime(jd, { longitude: rowB.longitude, speed: b.scaleSpeed(rowB.speed) });
   };
 }
 
@@ -338,13 +371,19 @@ function adaptiveJdGrid(startJd, endJd, stepDays, longitudeAt) {
 function ascendantProviderFor(progressedFrameAt) {
   const lonAt = (jd) => progressedFrameAt(jd).ascendant;
   const speedAt = (targetJd) => wrap180(lonAt(targetJd + 1) - lonAt(targetJd - 1)) / 2;
-  return {
+  // Memoized like every other provider the search engine sees (SUP-387). progressedFrameAt
+  // has a cache of its own, but it is keyed per whole ephemeris SECOND and a sample here is
+  // three lookups into it (jd, jd+1, jd-1 for the central difference) - so a repeated
+  // positionAt at one instant still costs three bucket misses' worth of work in the worst
+  // case, and two of those buckets are a day of target time away from any the other lookups
+  // touch.
+  return memoizeProvider({
     positionAt: (targetJd) => ({ longitude: lonAt(targetJd), speed: speedAt(targetJd) }),
     seriesFor(startJd, endJd, stepDays) {
       const jds = adaptiveJdGrid(startJd, endJd, stepDays, lonAt);
       return jds.map((jd) => ({ jd, longitude: lonAt(jd), speed: speedAt(jd) }));
     },
-  };
+  });
 }
 
 // A single progressed house cusp as a provider, same shape/precision tradeoffs as the
@@ -354,13 +393,13 @@ function ascendantProviderFor(progressedFrameAt) {
 function cuspProviderFor(progressedFrameAt, house) {
   const lonAt = (jd) => progressedFrameAt(jd).houses[house].longitude;
   const speedAt = (targetJd) => wrap180(lonAt(targetJd + 1) - lonAt(targetJd - 1)) / 2;
-  return {
+  return memoizeProvider({
     positionAt: (targetJd) => ({ longitude: lonAt(targetJd), speed: speedAt(targetJd) }),
     seriesFor(startJd, endJd, stepDays) {
       const jds = adaptiveJdGrid(startJd, endJd, stepDays, lonAt);
       return jds.map((jd) => ({ jd, longitude: lonAt(jd), speed: speedAt(jd) }));
     },
-  };
+  });
 }
 
 // house_frame: "progressed" composition (spec §1.1.1): the cusps move too, so house_ingress
@@ -369,23 +408,36 @@ function cuspProviderFor(progressedFrameAt, house) {
 // scanTransitingBody then segments at the stationary points of the DIFFERENCE, and
 // `direction` on the resulting crossings reflects the relative rate's sign rather than the
 // body's own (a body can be direct while what's actually closing the gap is the cusp).
-// Composed via positionAt rather than zipping seriesFor rows index-for-index the way
-// relativeLunarProvider does: a cusp/Ascendant provider's grid can be adaptively
-// subdivided (finer than the body's plain grid), so the two sides' rows aren't guaranteed
-// to line up positionally the way Sun/Moon's identical, non-adaptive grids do.
-function relativeMovingProvider(bodyProvider, cuspProvider) {
+// The coarse series is a ZIP of the two sides' own rows, not a re-sample of the union grid
+// (SUP-387): each side's seriesFor already returns longitude and speed for every row and
+// costs one swetest spawn to do it, so re-reading each row through positionAt threw that
+// away and paid two more spawns per row - 732 of them on a 1-year transit pair. The union
+// grid still earns its keep, just not the re-sampling: a cusp/Ascendant provider's grid can
+// be adaptively subdivided finer than the body's plain one, so unlike Sun/Moon's identical
+// non-adaptive grids in relativeLunarProvider, the two row sets aren't guaranteed to line
+// up and neither alone is safe to segment on. Rows one side is missing fall back to its
+// positionAt - one spawn, not two - instead of discarding both sides' rows to get there.
+//
+// `prefetch` is optional and purely a cost hint (see pairPrefetchFor): it fills the two
+// providers' memos from one batched swetest call before the composition reads them, and
+// composing is identical with or without it.
+function relativeMovingProvider(bodyProvider, cuspProvider, prefetch = null) {
+  const compose = (b, c) => ({ longitude: mod360(b.longitude - c.longitude), speed: b.speed - c.speed });
   const composeAt = (jd) => {
-    const b = bodyProvider.positionAt(jd);
-    const c = cuspProvider.positionAt(jd);
-    return { longitude: mod360(b.longitude - c.longitude), speed: b.speed - c.speed };
+    if (prefetch) prefetch(jd);
+    return compose(bodyProvider.positionAt(jd), cuspProvider.positionAt(jd));
   };
   return {
     positionAt: composeAt,
     seriesFor(startJd, endJd, stepDays) {
-      const bodyJds = bodyProvider.seriesFor(startJd, endJd, stepDays).map((r) => r.jd);
-      const cuspJds = cuspProvider.seriesFor(startJd, endJd, stepDays).map((r) => r.jd);
-      const jds = [...new Set([...bodyJds, ...cuspJds])].sort((a, b) => a - b);
-      return jds.map((jd) => ({ jd, ...composeAt(jd) }));
+      const bodyRows = new Map(bodyProvider.seriesFor(startJd, endJd, stepDays).map((r) => [r.jd, r]));
+      const cuspRows = new Map(cuspProvider.seriesFor(startJd, endJd, stepDays).map((r) => [r.jd, r]));
+      const jds = [...new Set([...bodyRows.keys(), ...cuspRows.keys()])].sort((a, b) => a - b);
+      return jds.map((jd) => {
+        const b = bodyRows.get(jd) ?? bodyProvider.positionAt(jd);
+        const c = cuspRows.get(jd) ?? cuspProvider.positionAt(jd);
+        return { jd, ...compose(b, c) };
+      });
     },
   };
 }
@@ -1968,9 +2020,21 @@ class SwissEphemerisServer {
       cusps.push({ house, longitude: cuspLongitude, coincidesWithSignIngress });
     }
 
-    const providerFor = (body) => (isProgressed
-      ? progressedBodyProvider(body, { birthJd, yearLengthDays })
-      : transitProviderFor(body));
+    // One memoized provider per body for the whole call, not one per call site (SUP-387).
+    // Both halves matter: memoizeProvider stops the same instant being re-spawned, and
+    // handing back the SAME provider object every time is what lets the aspect search, the
+    // ingress search, the pair search and the lunation search share one cache instead of
+    // three-plus disjoint ones. The caches die with this request - see memoizeProvider.
+    const bodyProviders = new Map();
+    const providerFor = (body) => {
+      const cached = bodyProviders.get(body);
+      if (cached) return cached;
+      const provider = memoizeProvider(isProgressed
+        ? progressedBodyProvider(body, { birthJd, yearLengthDays })
+        : transitProviderFor(body));
+      bodyProviders.set(body, provider);
+      return provider;
+    };
 
     // Progressed Midheaven/Ascendant/moving-cusp machinery (SUP-357/SUP-359 §4) - built
     // only when needed. mcProvider is pure arithmetic (lib/progressed-provider.js, reusing
@@ -1980,8 +2044,8 @@ class SwissEphemerisServer {
     // this mirrors exactly), memoized per whole EPHEMERIS second since calculateEphemeris
     // truncates to that resolution internally regardless (formatTimeToSwiss reads whole
     // UTC seconds), so caching at that granularity loses no precision it didn't already
-    // have and collapses the many nearby bisection queries refinement performs into a
-    // handful of actual swetest spawns.
+    // have and collapses the nearby queries root refinement performs into a handful of
+    // actual swetest spawns.
     let mcProvider = null;
     let ascProvider = null;
     let progressedFrameAt = null;
@@ -2319,7 +2383,10 @@ class SwissEphemerisServer {
         // (rather than reusing either body's individual scan) is what finds relative
         // stations - real for a general pair, unlike the Sun-Moon relative rate lunations
         // compose, which never reaches zero (spec §8.4).
-        const relativeProvider = relativeMovingProvider(fastScan.provider, slowScan.provider);
+        const relativeProvider = relativeMovingProvider(
+          fastScan.provider, slowScan.provider,
+          pairPrefetchFor(fastScan.provider, slowScan.provider), // one spawn for both bodies (SUP-387)
+        );
         const { segments: relativeSegments, stations: relativeStations } = scanTransitingBody(relativeProvider, startJd, endJd, scanStepDays);
 
         for (const [aspectName, aspectAngle] of Object.entries(aspectDefs)) {

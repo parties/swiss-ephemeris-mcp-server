@@ -11,7 +11,7 @@
 //                    failing.
 //
 //   the wall clock   bounds a test that never yields at all. Every swetest call in this
-//                    repo goes through execSync (lib/ephemeris-series.js), so a runaway
+//                    repo goes through execFileSync (lib/swetest-exec.js), so a runaway
 //                    search blocks the event loop outright and --test-timeout's timer
 //                    never gets to run - verified: a test that busy-loops for 20s passes
 //                    cleanly under --test-timeout=2000. Only killing the process from
@@ -27,10 +27,13 @@
 
 import { spawn } from 'node:child_process';
 
-// Both defaults are set off a measured run rather than picked round: the suite is ~6m15s
-// end to end and its slowest single test is ~82s (an eclipse-window search), so these are
-// roughly 3x the real figures. A genuine hang is unbounded, so a loose cap still catches
-// it - the headroom only buys tolerance for a slower or busier machine.
+// Both defaults were set off a measured run rather than picked round: when SUP-385 chose
+// them the suite was ~6m15s end to end with a ~82s slowest test, so they were roughly 3x
+// the real figures. SUP-389 and SUP-387 then compounded to cut the suite to ~35s (slowest
+// test ~5s) without moving them, so the margin is now much wider than 3x. That is
+// deliberate: a genuine hang is
+// unbounded, so a loose cap still catches it, while a cap pitched close to a fast suite's
+// real runtime starts failing honest runs on a slower or busier machine.
 const PER_TEST_TIMEOUT_MS = envInt('TEST_TIMEOUT_MS', 300_000);
 const WALL_CLOCK_MS = envInt('TEST_WALL_CLOCK_MS', 1_200_000);
 
