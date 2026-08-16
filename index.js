@@ -52,7 +52,7 @@ import {
   computeArcDegrees,
   computeFictitiousLongitude,
 } from './lib/progressions.js';
-import { jdFromDate, dateFromJd, seriesFor as ephemerisSeriesFor, positionAt as ephemerisPositionAt, positionsAt as ephemerisPositionsAt, eclipsesFor } from './lib/ephemeris-series.js';
+import { jdFromDate, dateFromJd, seriesFor as ephemerisSeriesFor, positionAt as ephemerisPositionAt, positionsAt as ephemerisPositionsAt, samplesFrom as ephemerisSamplesFrom, eclipsesFor } from './lib/ephemeris-series.js';
 import {
   memoizeProvider,
   scanTransitingBody,
@@ -302,6 +302,10 @@ function transitProviderFor(body) {
     batchSource: { body, ephemerisJdFor: (atJd) => atJd, scaleSpeed: (speed) => speed },
     seriesFor: (startJd, endJd, stepDays) => ephemerisSeriesFor(body, startJd, endJd, stepDays),
     positionAt: (atJd) => ephemerisPositionAt(body, atJd),
+    // The seam's batched read (SUP-390) - see lib/event-search.js's header. At the transit
+    // rate it is lib/ephemeris-series.js's samplesFrom verbatim, since provider JD already
+    // is ephemeris JD.
+    samplesFrom: (startJd, stepDays, count) => ephemerisSamplesFrom(body, startJd, stepDays, count),
   };
 }
 
@@ -421,14 +425,29 @@ function cuspProviderFor(progressedFrameAt, house) {
 // `prefetch` is optional and purely a cost hint (see pairPrefetchFor): it fills the two
 // providers' memos from one batched swetest call before the composition reads them, and
 // composing is identical with or without it.
+//
+// `samplesFrom` (SUP-390) is offered only when BOTH sides have one, which is exactly the
+// two-real-body pair case - and that is the composition whose relative rate genuinely
+// stations, so it is also the one where station refinement is worth batching. The
+// house_frame "progressed" composition takes the other branch: a moving cusp is a `-house`
+// computation per sample with no batched form, so the pair would be half-batched at best
+// and the refiner falls back to scalar bisection instead.
 function relativeMovingProvider(bodyProvider, cuspProvider, prefetch = null) {
   const compose = (b, c) => ({ longitude: mod360(b.longitude - c.longitude), speed: b.speed - c.speed });
   const composeAt = (jd) => {
     if (prefetch) prefetch(jd);
     return compose(bodyProvider.positionAt(jd), cuspProvider.positionAt(jd));
   };
+  const batched = typeof bodyProvider.samplesFrom === 'function' && typeof cuspProvider.samplesFrom === 'function';
   return {
     positionAt: composeAt,
+    samplesFrom: batched
+      ? (startJd, stepDays, count) => {
+        const bodyRows = bodyProvider.samplesFrom(startJd, stepDays, count);
+        const cuspRows = cuspProvider.samplesFrom(startJd, stepDays, count);
+        return bodyRows.map((b, i) => ({ jd: b.jd, ...compose(b, cuspRows[i]) }));
+      }
+      : undefined,
     seriesFor(startJd, endJd, stepDays) {
       const bodyRows = new Map(bodyProvider.seriesFor(startJd, endJd, stepDays).map((r) => [r.jd, r]));
       const cuspRows = new Map(cuspProvider.seriesFor(startJd, endJd, stepDays).map((r) => [r.jd, r]));

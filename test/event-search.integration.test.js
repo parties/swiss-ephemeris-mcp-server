@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SwissEphemerisServer } from '../index.js';
 import { resolveChartPoint, resolveAspectSettings, orbAllowedFor, MAJOR_ASPECTS } from '../lib/aspects.js';
-import { jdFromDate, seriesFor, positionAt, eclipsesFor } from '../lib/ephemeris-series.js';
+import { jdFromDate, seriesFor, positionAt, samplesFrom, eclipsesFor } from '../lib/ephemeris-series.js';
 import {
   memoizeProvider,
   scanTransitingBody,
@@ -21,10 +21,20 @@ const HAS_SWETEST = swetestAvailable(EPHE_PATH);
 
 const jd = (iso) => jdFromDate(new Date(iso));
 
+// Deliberately WITHOUT samplesFrom, so every test below drives the scalar seam - the same
+// fallback path index.js's progressed Ascendant and moving-cusp providers take. The batched
+// seam gets its own equivalence test at the bottom of this file (SUP-390).
 function providerFor(body) {
   return {
     seriesFor: (startJd, endJd, stepDays) => seriesFor(body, startJd, endJd, stepDays),
     positionAt: (atJd) => positionAt(body, atJd),
+  };
+}
+
+function batchedProviderFor(body) {
+  return {
+    ...providerFor(body),
+    samplesFrom: (startJd, stepDays, count) => samplesFrom(body, startJd, stepDays, count),
   };
 }
 
@@ -591,4 +601,47 @@ test('findCrossings: Pluto crosses 300° five times 2023-2025 (retrograde re-ing
     assert.equal(c.retrograde, !expectedDirect[i]);
     assert.ok(Math.abs(c.longitude - 300) < 1e-4);
   });
+});
+
+// SUP-390: the batched station refinement is a spawn-count change and nothing else, so the
+// gate is that a provider offering `samplesFrom` and one offering only `positionAt` return
+// the SAME station - to the last bit, not to a tolerance. Pluto's dithering printed speed
+// near a station (see test/station-refinement.test.js) is exactly what makes that a real
+// assertion rather than a formality: a sampling rule that picks a different flip in the
+// dither band shows up here as a station seconds away.
+test('station refinement: batched and scalar providers agree bit-for-bit on real stations', { skip: !HAS_SWETEST }, () => {
+  const start = jd('2026-01-01T00:00:00Z');
+  const end = jd('2027-01-01T00:00:00Z');
+
+  for (const body of ['Mercury', 'Pluto', 'Neptune']) {
+    const scalar = findStations(providerFor(body), start, end, 1);
+    const batched = findStations(batchedProviderFor(body), start, end, 1);
+    assert.ok(scalar.length > 0, `expected at least one ${body} station in 2026`);
+    assert.deepEqual(batched, scalar, `${body}: batched station refinement diverged from scalar bisection`);
+  }
+});
+
+// The other half of the same claim: it is cheaper. Counted rather than timed - a spawn count
+// is the thing the change is actually about, and it does not drift with machine load.
+test('station refinement: batching cuts spawns per station about fourfold', { skip: !HAS_SWETEST }, () => {
+  const start = jd('2026-01-01T00:00:00Z');
+  const end = jd('2027-01-01T00:00:00Z');
+
+  const count = (provider) => {
+    const spawns = { n: 0 };
+    const counted = {
+      seriesFor: (...args) => { spawns.n += 1; return provider.seriesFor(...args); },
+      positionAt: (...args) => { spawns.n += 1; return provider.positionAt(...args); },
+      ...(provider.samplesFrom ? { samplesFrom: (...args) => { spawns.n += 1; return provider.samplesFrom(...args); } } : {}),
+    };
+    findStations(counted, start, end, 1);
+    return spawns.n;
+  };
+
+  const scalarSpawns = count(providerFor('Pluto'));
+  const batchedSpawns = count(batchedProviderFor('Pluto'));
+  assert.ok(
+    batchedSpawns * 3 < scalarSpawns,
+    `expected batching to cut spawns by more than 3x, got ${scalarSpawns} -> ${batchedSpawns}`,
+  );
 });

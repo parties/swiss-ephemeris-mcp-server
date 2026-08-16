@@ -103,11 +103,22 @@ search, which runs the same either way. What drives cost is the **sample count o
 search**: window length, body count, target count and aspect count all multiply into it, and the
 pair branch is a small minority of the total.
 
-Two changes have since attacked that cost from opposite ends, and they compound: SUP-389 made each
-spawn ~2.5× cheaper by dropping the `/bin/sh` wrapper (`lib/swetest-exec.js`), and SUP-387 cut the
-number of spawns ~8× by memoizing the provider seam and replacing the bisection ladder with a
-safeguarded Newton step. Wall clocks quoted anywhere against an older tree are stale in both
-directions — re-measure rather than scaling them.
+Three changes have since attacked that cost from different ends, and they compound: SUP-389 made
+each spawn ~2.5× cheaper by dropping the `/bin/sh` wrapper (`lib/swetest-exec.js`); SUP-387 cut the
+number of spawns ~8× by memoizing the provider seam and replacing the crossing refinement's
+bisection ladder with a safeguarded Newton step; SUP-390 then batched the one bisection ladder
+SUP-387 deliberately left alone — station refinement — behind a new optional seam method,
+`samplesFrom(startJd, stepDays, count)`. Wall clocks quoted anywhere against an older tree are
+stale in every direction — re-measure rather than scaling them.
+
+**SUP-390 is also the cautionary tale about scaling an estimate instead of re-measuring.** It was
+filed predicting ~5× on `find_events` from "~24 bisection iterations, one spawn each". By the time
+it was implemented SUP-387 had landed, and a fresh call-site attribution showed the crossing
+refinement was already down to **2.15 samples per root** — at the floor, nothing left to batch. The
+remaining ladder, `refineStationJd`, was 15% of a 1-year transit call and 6% of a 3-year progressed
+one. Batching it is a real 4.3× on a station-heavy request and about 1.1× on a mixed one; the 5×
+never existed by the time anyone could collect it. If a perf ticket here quotes a figure, check
+what landed since it was written before you budget against it.
 
 Note also that **no CI job runs tests at all** in this repo (SUP-386 tracks fixing that). A green
 check on a PR here means the PR *title* linted. Whoever reviews is relying on your quoted local run.

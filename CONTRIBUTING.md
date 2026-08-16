@@ -114,6 +114,77 @@ cheaper without removing a single one; SUP-387 removed ~87% of them without maki
 cheaper.** Neither figure is a substitute for the other, and neither is a substitute for re-running
 the thing you care about.
 
+### What SUP-390 changed, and what is left
+
+SUP-387 left exactly one bisection ladder standing — `refineStationJd`, which narrows a station
+bracket to `JD_TOLERANCE` (0.05 s) one sample at a time: 21 halvings from the transit rate's
+day-wide bracket, 30 from the progressed rate's tropical-year one. SUP-390 batches it. `swetest`
+emits an arithmetic JD grid from one process (`-jX -sSTEP -nN`), so the 2^k − 1 points a k-halving
+bisection *could* visit are fetched in a single spawn and the k steps replayed against them in
+memory. At `k = 6` that is 63 rows a spawn.
+
+The seam grew one optional method for it — `samplesFrom(startJd, stepDays, count)`, alongside
+`seriesFor`/`positionAt`. A provider without one (the progressed Ascendant, the moving house cusps —
+each sample there is a `-house` chart computation with no batched form) keeps the scalar loop
+untouched, which is why the progressed-rate rows below barely move.
+
+`DAY_CHART`, this branch against `origin/main` at `d4b7678` — i.e. **after** both SUP-387 and
+SUP-389, so this isolates SUP-390 alone. Every scenario returned **byte-identical** JSON on both
+sides (all seven diffed whole, not sampled). Spawn counts are exact; wall clocks are best-of-3 from
+a separate uninstrumented run alternating the two trees scenario by scenario:
+
+| `find_events` call | Spawns | Wall |
+|---|---|---|
+| 3yr transit, `station` only, 8 bodies | 1,154 → **270** (4.3×) | 2,603 → **878** ms (3.0×) |
+| 3yr transit, sign + house ingress | 926 → **314** (2.9×) | 2,403 → **1,076** ms (2.2×) |
+| 1yr transit, all five event types | 1,652 → **1,496** (1.10×) | 3,847 → **3,481** ms (1.11×) |
+| 2yr progressed, house ingress, moving cusps | 810 → **785** (1.03×) | not measured |
+| 3yr progressed, all five event types | 1,739 → **1,719** (1.01×) | indistinguishable |
+| 1yr transit, `lunation` only, eight_phase | 402 → **402** (1.00×) | not measured |
+
+Wall gains trail spawn gains because a batched spawn is not a free spawn — 63 rows add ~0.9 ms to a
+~2.1 ms process. The progressed row is genuinely flat: six interleaved reps ran 3,853–4,344 ms on
+`main` and 3,712–4,664 ms on the branch, which is noise around a 1% spawn change, not a regression.
+The lunation row is 1.00× by construction rather than by accident — the Sun–Moon relative rate never
+reaches zero, so that search refines no stations at all.
+
+**Why the headline is 1.1× and not the 5× the ticket predicted.** SUP-390 was filed against the
+pre-SUP-387 tree, where crossing refinement was a 24-step bisection. It is not any more. Attributing
+every spawn of a 1-year all-types transit call to its call site, post-SUP-387:
+
+| Call site | Spawns | Share |
+|---|---|---|
+| `refineSegmentCrossing` (Newton) | 956 | 57.9% |
+| `findContacts` orb-interval midpoint test | 398 | 24.1% |
+| `refineStationJd` | 252 | 15.3% |
+| coarse `seriesFor` + station position reads | 28 | 1.7% |
+
+Those 956 crossing samples refine 444 roots — **2.15 samples per root**, against a floor of 1. There
+is nothing there to batch, which is what SUP-387 bought. Station refinement was all that was left,
+and 15.3% of a call is what batching it can be worth. The same attribution at the progressed rate
+puts `refineStationJd` at 6.3% and something else entirely at the top: 41.6% of the spawns are the
+two `calculateEphemeris` calls behind every progressed frame (`progressedFrameAt`), one of which
+fetches all 17 bodies purely to read the obliquity off the `Ecl. Obl.` row. That is the biggest
+remaining lever at that rate and it is not this ticket.
+
+The cost model the `k = 6` batch width comes from, measured on an M-series Mac 2026-08-16 with the
+`execFileSync` path SUP-389 left: a spawn costs **~2.1 ms fixed** plus **~15 µs per additional row**,
+flat from 1 row out to 1,024. So 63 rows cost about 1.5 spawns' wall clock and do 6 spawns' work.
+`k = 5`/`6`/`7` all land within ~5% of each other on a day-wide bracket (12.8/12.2/12.0 ms against
+bisection's 44 ms); `k = 11` — two spawns of 2,047 rows — is back up at 65 ms.
+
+**The one real hazard, recorded because it is not obvious.** Near a station the printed speed does
+not step cleanly through zero, it *dithers*: sampled at 0.25 s resolution through Pluto's
+2027-05-08 station it reads `0.0000000 / 0.0000001 / 0.0000000 / 0.0000001` over about three
+seconds, as the true speed grazes the 7th decimal. So `sign(speed) === sign(speedLo)` is **not
+monotone** across the bracket, and taking the leftmost sign change in a fetched grid — the obvious
+way to use a batch, and the first thing written here — is not the same rule as bisection. It moved
+8 of 52 transit-rate stations, three of them by a whole reported second. Replaying bisection's own
+index sequence over the grid instead is bit-identical on all 52, and agrees to 8 × 10⁻⁵ s (about two
+ulps of a JD double) at the progressed rate, where the tropical-year coarse step makes the grid
+arithmetic non-dyadic. `test/station-refinement.test.js` pins this with synthetic dithering curves
+and a foil implementation of the rejected rule, so the guard cannot quietly go vacuous.
+
 **The quarantine stays, and here is the arithmetic rather than a preference.** SUP-387 set out to
 make this file cheap enough to un-quarantine. It got `test:slow` from never-finishing to 11 minutes,
 which is a budget a CI job could carry — but deleting the skip does not add 11 minutes to a CI job,
