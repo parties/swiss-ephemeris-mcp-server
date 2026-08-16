@@ -21,6 +21,7 @@ import {
   parseHouseLine,
   parseChartPointLine,
 } from './lib/swetest-parse.js';
+import { execSwetest, swetestBinary, ephePath as resolveEphePath } from './lib/swetest-exec.js';
 import { moonPhase, PHASE_SCHEME } from './lib/moon-phase.js';
 import {
   DEFAULT_ASPECT_BODIES,
@@ -96,11 +97,6 @@ const SYNASTRY_BODIES = ['Sun', 'Moon', 'Mercury', 'Venus', 'Mars', 'Jupiter', '
 // Part of Fortune). Descendant/IC are excluded - they're exact mirrors of ASC/MC for house
 // placement and the codebase already treats them as non-first-class (ASPECTABLE_ANGLES).
 const SYNASTRY_OVERLAY_BODIES = [...SYNASTRY_BODIES, ...ASPECTABLE_ANGLES];
-
-// Falls back to the vendor/ dir shipped alongside this file (works both in the
-// Docker image, where it's copied to /app/vendor/swisseph, and in local/npx
-// installs, where /app doesn't exist). SE_EPHE_PATH still overrides it.
-const DEFAULT_EPHE_PATH = path.join(path.dirname(fileURLToPath(import.meta.url)), 'vendor', 'swisseph');
 
 const PACKAGE_ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_JSON = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8'));
@@ -969,7 +965,9 @@ class SwissEphemerisServer {
 
       const swissDate = formatDateToSwiss(date);
       const swissTime = formatTimeToSwiss(date);
-      const ephePath = process.env.SE_EPHE_PATH || DEFAULT_EPHE_PATH;
+      // Only read here for the missing-data warning below - execSwetest resolves it
+      // itself and passes it to the child through the environment.
+      const ephePath = resolveEphePath();
 
       // Execute swetest for planets, including asteroids and additional points
       // 0123456789 = Sun through Pluto, t/m = true/mean Node (node_type param, see
@@ -981,19 +979,33 @@ class SwissEphemerisServer {
       const nodeCode = Object.hasOwn(NODE_TYPE_CODES, nodeType) ? NODE_TYPE_CODES[nodeType] : NODE_TYPE_CODES.true;
       // -fPZSBDl- (trailing -) appends illuminated fraction of the disc at the end, after
       // every existing column, so none of the positional indices above shift.
-      const planetCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -p0123456789${nodeCode}ADFGHIo -fPZSBDl- -g, -head`;
+      const planetArgs = [
+        `-b${swissDate}`,
+        `-ut${swissTime}`,
+        `-p0123456789${nodeCode}ADFGHIo`,
+        '-fPZSBDl-',
+        '-g,',
+        '-head',
+      ];
       let planetOutput;
       try {
-        planetOutput = execSync(planetCmd, { encoding: 'utf8' });
+        planetOutput = execSwetest(planetArgs);
       } catch (error) {
         throw new Error(`Failed to execute swetest for planets: ${error.message}`);
       }
 
       // Execute swetest for houses
-      const houseCmd = `SE_EPHE_PATH=${ephePath} swetest -b${swissDate} -ut${swissTime} -house${longitude},${latitude},${houseSystem} -fPZSBD -g, -head`;
+      const houseArgs = [
+        `-b${swissDate}`,
+        `-ut${swissTime}`,
+        `-house${longitude},${latitude},${houseSystem}`,
+        '-fPZSBD',
+        '-g,',
+        '-head',
+      ];
       let houseOutput;
       try {
-        houseOutput = execSync(houseCmd, { encoding: 'utf8' });
+        houseOutput = execSwetest(houseArgs);
       } catch (error) {
         throw new Error(`Failed to execute swetest for houses: ${error.message}`);
       }
@@ -2988,6 +3000,12 @@ class SwissEphemerisServer {
   }
 
   async run() {
+    // Locate swetest before accepting a single request. Every tool here needs it, so a
+    // missing install is a broken deployment, not a bad request - discovering it on the
+    // first tool call instead surfaces it as a per-call "Failed to execute swetest"
+    // buried in a tool response, once per request, forever.
+    swetestBinary();
+
     // Check if we should run as HTTP server (for ngrok) or stdio
     const useHttp = process.env.MCP_HTTP_MODE === 'true';
     
@@ -3120,5 +3138,11 @@ export { SwissEphemerisServer, adaptiveJdGrid };
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const server = new SwissEphemerisServer();
-  server.run().catch(console.error);
+  // Exit non-zero rather than logging and lingering: run() failing means no transport was
+  // ever connected, and a process that stays up in that state looks healthy to whatever
+  // supervises it (Claude Desktop, Docker's restart policy) while serving nothing.
+  server.run().catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
 }

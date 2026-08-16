@@ -12,13 +12,13 @@ const HAS_SWETEST = swetestAvailable(EPHE_PATH);
 
 // SUP-385: opt-in, because these are the most expensive tests in the repo - every one of
 // them searches a 90-year progressed window, and each position sample is its own
-// synchronous `swetest` process spawn (lib/ephemeris-series.js, via execSync).
+// synchronous `swetest` process spawn (lib/ephemeris-series.js, via lib/swetest-exec.js).
 //
-// SUP-387 cut this file roughly 4x, and it now finishes - which it had never once been
-// observed to do. That is still far too long a wall clock to gate `npm test` on, so the
-// quarantine stays: run it with `npm run test:slow`, or RUN_SLOW_TESTS=1. Closing the
-// remaining gap means removing the process spawn itself (a persistent swetest, or libswe
-// bindings), which is its own ticket - not a shorter window here.
+// SUP-387 cut this file to ~11 minutes end to end, and it now finishes - which it had never
+// once been observed to do. That is still far too long a wall clock to gate `npm test` on
+// (36s today), so the quarantine stays: run it with `npm run test:slow`, or RUN_SLOW_TESTS=1.
+// Closing the remaining gap means removing the process spawn itself (a persistent swetest,
+// or libswe bindings), which is its own ticket - not a shorter window here.
 //
 // Correcting what this comment used to claim, because the numbers were attributed to the
 // wrong thing and someone will otherwise optimise the wrong code. It said "61,150 swetest
