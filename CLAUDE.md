@@ -89,9 +89,9 @@ decision for the repo owner, not something to do unprompted.
 
 `test/find-events-pair-aspects.integration.test.js` is quarantined behind `RUN_SLOW_TESTS=1`
 (SUP-385): its 90-year progressed searches are the most expensive tests in the repo. A green
-`npm test` (~35s) therefore says nothing about `include_pair_aspects`. Touching the pair path —
+`npm test` (~20s) therefore says nothing about `include_pair_aspects`. Touching the pair path —
 or the shared provider/root-finder seam under it in `lib/event-search.js` — means running `npm run
-test:slow` and budgeting about 11 minutes for it. Say which of the two you ran when you report a
+test:slow` and budgeting about 8 minutes for it. Say which of the two you ran when you report a
 result. Details and per-test timings: `CONTRIBUTING.md`.
 
 Note the cost is **not** specific to pair aspects, and an earlier version of this file said it was.
@@ -103,13 +103,25 @@ search, which runs the same either way. What drives cost is the **sample count o
 search**: window length, body count, target count and aspect count all multiply into it, and the
 pair branch is a small minority of the total.
 
-Three changes have since attacked that cost from different ends, and they compound: SUP-389 made
+Four changes have since attacked that cost from different ends, and they compound: SUP-389 made
 each spawn ~2.5× cheaper by dropping the `/bin/sh` wrapper (`lib/swetest-exec.js`); SUP-387 cut the
 number of spawns ~8× by memoizing the provider seam and replacing the crossing refinement's
 bisection ladder with a safeguarded Newton step; SUP-390 then batched the one bisection ladder
 SUP-387 deliberately left alone — station refinement — behind a new optional seam method,
-`samplesFrom(startJd, stepDays, count)`. Wall clocks quoted anywhere against an older tree are
-stale in every direction — re-measure rather than scaling them.
+`samplesFrom(startJd, stepDays, count)`; SUP-391 removed the last non-refinement spawn, the
+orb-interval midpoint probe in `findContacts`, for another 1.3–1.45×. Wall clocks quoted anywhere
+against an older tree are stale in every direction — re-measure rather than scaling them.
+
+**The floor is now known, and it is the process, not the program (SUP-391).** A `swetest` spawn
+costs ~1.79 ms on an M-series Mac, of which ~1.61 ms is spent before any ephemeris is touched (a
+`swetest` given an unrecognised flag, which computes nothing, costs that much) and ~1.15 ms is what
+`/usr/bin/true` costs. The Swiss Ephemeris work behind one position is **0.11 ms**. So: `swetest`
+has no persistent mode to exploit and a free one would buy ~10%; nothing in the Node spawn API
+(`execFileSync` vs `spawnSync`, env size, stdio shape) moves the figure at all; and after SUP-391
+**90.7%** of a 1-year transit aspect call's spawns are crossing refinement running at 2.18 samples
+per root against a floor of 2. Further sample-count work is worth single-digit percent. The only
+remaining lever is deleting the process boundary — in-process libswe (**SUP-394**) — which is ~16×
+and a dependency/build/re-verification decision, not a patch. Full measurements: `CONTRIBUTING.md`.
 
 **SUP-390 is also the cautionary tale about scaling an estimate instead of re-measuring.** It was
 filed predicting ~5× on `find_events` from "~24 bisection iterations, one spawn each". By the time
