@@ -3,14 +3,19 @@
 ## Running the tests
 
 ```bash
-npm test          # the gate: ~6m15s, self-terminating
-npm run test:slow # everything, including the quarantine: ~2h, deliberately unbounded
+npm test          # the gate: ~3 min, self-terminating
+npm run test:slow # everything, including the quarantine: ~1h, deliberately unbounded
 ```
 
-**Budget six to seven minutes for `npm test`.** Measured on an M-series Mac, 2026-08-15: `6m15s`
-wall clock, 398 tests, 382 pass, 16 skipped, exit 0. The slowest single test is ~82s (an eclipse
-window search) — nothing here is instant, because almost every integration test shells out to
-`swetest` for real ephemeris data rather than using a recorded fixture.
+**Budget three to four minutes for `npm test`.** Measured on an M-series Mac, 2026-08-16:
+`2m56s` wall clock, 403 tests, 387 pass, 16 skipped, exit 0. Nothing here is instant, because
+almost every integration test spawns `swetest` for real ephemeris data rather than using a
+recorded fixture.
+
+That figure roughly halved in SUP-389, which stopped routing every spawn through `/bin/sh`. Run
+back to back on one machine, the suite went `7m39s` (the commit before) to `2m56s` (the commit
+after). The older `6m15s`/398-test figure in this file's history was the same pre-change suite on
+a quieter machine — worth knowing before reading any absolute number here as a target.
 
 `npm test` runs through `scripts/run-tests.mjs` rather than calling `node --test` directly, because
 `node --test` alone cannot fail a hung run in this repo. Two independent bounds are needed
@@ -22,8 +27,8 @@ window search) — nothing here is instant, because almost every integration tes
 | whole run | `TEST_WALL_CLOCK_MS` | `1200000` | a test that blocks without ever yielding |
 
 The second is not redundant. `--test-timeout` is a timer *inside* the test process, so it only fires
-when the event loop turns — and every `swetest` call in this repo goes through `execSync`
-(`lib/ephemeris-series.js`), so a runaway search blocks the loop outright and that timer never runs.
+when the event loop turns — and every `swetest` call in this repo goes through `execFileSync`
+(`lib/swetest-exec.js`), so a runaway search blocks the loop outright and that timer never runs.
 Verified: a test that busy-loops for 20s passes clean under `--test-timeout=2000`. Only killing the
 process from outside catches that shape. Both defaults are roughly 3× the measured figures above;
 set either to `0` to disable it.
@@ -38,24 +43,31 @@ tail` reports `tail`'s exit status, not node's.)
 `RUN_SLOW_TESTS=1` (`npm run test:slow`). It is not broken and it does not hang — it is
 arithmetically enormous.
 
-**Budget about two hours.** That is an estimate summed from measured parts, not an observed total:
+**Budget about an hour.** That is an estimate summed from measured parts, not an observed total:
 the file has never once been seen to finish, with attempts abandoned at 42 minutes and at 1h56m
-(the latter a full-suite run, with this file still outstanding). Because nobody knows the real
-figure, `test:slow` sets **no** wall-clock bound (`TEST_WALL_CLOCK_MS=0`) — a cap pitched near an
-unknown runtime just converts "slow" into "fails after N hours and tells you nothing". `npm test`,
-the actual gate, stays bounded either way.
+(the latter a full-suite run, before SUP-389, with this file still outstanding). Because nobody
+knows the real figure, `test:slow` sets **no** wall-clock bound (`TEST_WALL_CLOCK_MS=0`) — a cap
+pitched near an unknown runtime just converts "slow" into "fails after N hours and tells you
+nothing". `npm test`, the actual gate, stays bounded either way.
 
-Measured directly against this implementation on an M-series Mac, 2026-08-15, by calling
-`find_events` in-process with each test's own parameters:
+Measured directly against this implementation on an M-series Mac by calling `find_events`
+in-process with each test's own parameters:
 
-| Configuration | Measured |
-|---|---|
-| 1 pair (Sun–Moon), 90yr progressed, majors — §9.1 | **5.2 min** (25 episodes) |
-| the same with `include_minor` — §9.1/§6.1 | **12.7 min** (62 episodes) |
-| default 10 pairs, 90yr progressed — §9.2 | **6.7 min** (109 episodes) |
-| 3 slow pairs (Sun/Venus/Mars), 90yr progressed — §9.3 | **5.1 min** (1 episode) |
-| default 10 pairs, 10yr progressed — §9.5 | **1.1 min** |
-| default 21 pairs, 1yr transit — §9.6 | **3.0 min** (52 episodes) |
+| Configuration | Pre-SUP-389 | Post-SUP-389 |
+|---|---|---|
+| 1 pair (Sun–Moon), 90yr progressed, majors — §9.1 | 5.2 min (25 episodes) | — |
+| the same with `include_minor` — §9.1/§6.1 | 12.7 min (62 episodes) | — |
+| default 10 pairs, 90yr progressed — §9.2 | 6.7 min (109 episodes) | — |
+| 3 slow pairs (Sun/Venus/Mars), 90yr progressed — §9.3 | 5.1 min (1 episode) | — |
+| default 10 pairs, 10yr progressed — §9.5 | 1.1 min | **0.4 min** |
+| default 21 pairs, 1yr transit — §9.6 | 3.0 min (52 episodes) | **1.4 min** (52 episodes) |
+
+The left column is 2026-08-15, before SUP-389. Only the last two rows were re-measured after it
+(2026-08-16), as a back-to-back A/B of the two commits on one machine: `56.5s → 23.7s` and
+`225.4s → 85.9s`, returning identical episode counts either way. That is **2.4–2.6×**, and there is
+no reason for the un-re-measured rows to behave differently — this path is nothing but spawn cost,
+which is exactly what changed. Treat the left column as an upper bound and halve it, or better,
+re-measure the row you actually care about.
 
 Two things follow, and both are counterintuitive enough to be worth stating before anyone estimates
 this file again:
@@ -68,13 +80,14 @@ this file again:
 - **`include_minor` costs roughly 2.5× a majors-only search** (2.47× at 90yr, 2.29× at 10yr): four
   more aspect angles to detect and bisect.
 
-Summing the file's 16 quarantined tests at these rates lands at **≈1.5–2 h uncontended**, which is
-consistent with a contended full-suite run still going at 1h56m. The underlying number to attack is
-process spawns: one Sun–Moon 90-year search costs **61,150 `swetest` invocations**, each one
-synchronous.
+Summing the file's 16 quarantined tests at the left column's rates lands at **≈1.5–2 h
+uncontended**, consistent with a pre-SUP-389 contended full-suite run still going at 1h56m; at the
+2.4–2.6× measured after it, **≈40 min–1 h**. The underlying number to attack is still process
+spawns: one Sun–Moon 90-year search costs **61,150 `swetest` invocations**, each one synchronous.
+SUP-389 made each of those invocations about 2.5× cheaper; it did not remove a single one.
 
 So **a green `npm test` says nothing about `include_pair_aspects`.** If you touch the pair path in
-`index.js` or `lib/event-search.js`, run `npm run test:slow` and budget the two hours. Whichever of
+`index.js` or `lib/event-search.js`, run `npm run test:slow` and budget the hour. Whichever of
 the two you ran, say which one when you report a result. SUP-387 tracks making this fast enough to
 un-quarantine; the skip and this section go away together.
 

@@ -30,6 +30,8 @@ git clone https://github.com/aloistr/swisseph.git /tmp/swisseph && \
     rm -rf /tmp/swisseph
 ```
 
+`swetest` is located on `PATH` once, at startup. If it isn't there the server exits immediately with a message saying so, rather than starting and failing every individual tool call — worth knowing if you launch it from a GUI app (Claude Desktop) whose `PATH` is narrower than your shell's.
+
 `SE_EPHE_PATH` (the directory holding the `.se1` ephemeris data files) defaults to the `vendor/swisseph/` directory shipped alongside this package, so it works out of the box for both Docker and local/npx installs. Set the `SE_EPHE_PATH` environment variable to override it.
 
 
