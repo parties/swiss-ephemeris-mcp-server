@@ -198,10 +198,10 @@ seconds, not minutes — which, per the floor established below, needs the spawn
 round of sample-count work.
 
 The remaining cost is process spawn, and the only thing left that removes it is removing the spawn
-itself — which is its own ticket (SUP-391, below), not a shorter window here. Where 11 minutes
-*does* pay off is CI: `test:slow` is now a plausible separate job, which it was not at 26 minutes
-and certainly not at two hours. That belongs to SUP-386, which tracks this repo having any test job
-at all.
+itself — which SUP-391 measured and found is not reachable from `swetest` at all, leaving in-process
+libswe (**SUP-394**) as the only lever, not a shorter window here. Where 8 minutes *does* pay off is
+CI: `test:slow` is now a plausible separate job, which it was not at 26 minutes and certainly not at
+two hours. That belongs to SUP-386, which tracks this repo having any test job at all.
 
 So **a green `npm test` still says nothing about `include_pair_aspects`.** If you touch the pair
 path — or the shared provider/root-finder seam under it in `lib/event-search.js` — run `npm run
@@ -305,7 +305,7 @@ collect-requests / resolve-batch / resume — not a new seam method like `sample
 the engine's shape — for a constant factor that in-process bindings would then make redundant.
 Recorded as measured-and-declined, not overlooked.
 
-**What would actually remove the floor** is the other half of SUP-391's title: in-process libswe
+**What would actually remove the floor** is the other half of SUP-391's title, now **SUP-394**: in-process libswe
 (native or WASM), which deletes the 1.7 ms outright and leaves the 0.11 ms. That is worth roughly
 16× on the sample cost — an order of magnitude more than anything above. It is also a decision
 rather than a patch: it adds a build step to a repo that has none, changes what produces the numbers

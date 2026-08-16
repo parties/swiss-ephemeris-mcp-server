@@ -120,8 +120,8 @@ has no persistent mode to exploit and a free one would buy ~10%; nothing in the 
 (`execFileSync` vs `spawnSync`, env size, stdio shape) moves the figure at all; and after SUP-391
 **90.7%** of a 1-year transit aspect call's spawns are crossing refinement running at 2.18 samples
 per root against a floor of 2. Further sample-count work is worth single-digit percent. The only
-remaining lever is deleting the process boundary — in-process libswe — which is ~16× and a
-dependency/build/re-verification decision, not a patch. Full measurements: `CONTRIBUTING.md`.
+remaining lever is deleting the process boundary — in-process libswe (**SUP-394**) — which is ~16×
+and a dependency/build/re-verification decision, not a patch. Full measurements: `CONTRIBUTING.md`.
 
 **SUP-390 is also the cautionary tale about scaling an estimate instead of re-measuring.** It was
 filed predicting ~5× on `find_events` from "~24 bisection iterations, one spawn each". By the time
