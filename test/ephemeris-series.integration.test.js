@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jdFromDate, dateFromJd, positionAt, seriesFor, eclipsesFor } from '../lib/ephemeris-series.js';
+import { jdFromDate, dateFromJd, positionAt, positionsAt, seriesFor, eclipsesFor } from '../lib/ephemeris-series.js';
 import { resolveEphePath, swetestAvailable } from './fixtures/ephe-path.js';
 
 const EPHE_PATH = resolveEphePath();
@@ -62,6 +62,33 @@ test('positionAt: agrees with the matching row from seriesFor at the same JD', {
   const point = positionAt('Pluto', rows[0].jd);
   assert.ok(Math.abs(point.longitude - rows[0].longitude) < 1e-6);
   assert.ok(Math.abs(point.speed - rows[0].speed) < 1e-6);
+});
+
+// SUP-387. positionsAt exists to turn N single-body spawns into one, so the only thing
+// that can go wrong is silently attributing one body's position to another - and the row
+// mapping rests on swetest emitting rows in the order the `-p` codes were given. That is
+// an observed property of the binary, not a documented guarantee, so it gets pinned here:
+// a reordering (or a future swetest that sorts by planet number) fails this rather than
+// quietly returning Mars' longitude for Chiron in every pair aspect the server reports.
+test('positionsAt: each body matches its own positionAt, in the order requested', { skip: !HAS_SWETEST }, () => {
+  // Deliberately not in swetest's own body-number order, and including two bodies whose
+  // printed names ("true Node", "mean Apogee") don't match this server's names - the two
+  // cases a name-keyed implementation would get wrong.
+  const bodies = ['Chiron', 'Mars', 'North Node', 'Moon', 'Lilith'];
+  const atJd = jd('2026-06-01T00:00:00Z');
+
+  const batched = positionsAt(bodies, atJd);
+  assert.equal(batched.length, bodies.length);
+
+  bodies.forEach((body, index) => {
+    const single = positionAt(body, atJd);
+    assert.equal(batched[index].longitude, single.longitude, `${body} longitude at index ${index}`);
+    assert.equal(batched[index].speed, single.speed, `${body} speed at index ${index}`);
+  });
+});
+
+test('positionsAt: rejects an unknown body rather than mis-mapping the rows it did get', { skip: !HAS_SWETEST }, () => {
+  assert.throws(() => positionsAt(['Sun', 'Nibiru'], jd('2026-06-01T00:00:00Z')), /Unknown body/);
 });
 
 // Spec §4.7 - both eclipse cases, verified against the vendored ephemeris.

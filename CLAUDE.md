@@ -88,11 +88,20 @@ decision for the repo owner, not something to do unprompted.
 ## `npm test` does not run everything
 
 `test/find-events-pair-aspects.integration.test.js` is quarantined behind `RUN_SLOW_TESTS=1`
-(SUP-385) because a single pair search over its 90-year window costs ~61,000 synchronous `swetest`
-spawns. A green `npm test` therefore says nothing about `include_pair_aspects`. Touching the pair
-path in `index.js` or `lib/event-search.js` means running `npm run test:slow` and budgeting about
-two hours for it — say which of the two you ran when you report a result. Details and per-test
-timings: `CONTRIBUTING.md`.
+(SUP-385): its 90-year progressed searches are the most expensive tests in the repo. A green
+`npm test` (~1m15s) therefore says nothing about `include_pair_aspects`. Touching the pair path —
+or the shared provider/root-finder seam under it in `lib/event-search.js` — means running `npm run
+test:slow` and budgeting about 26 minutes for it. Say which of the two you ran when you report a
+result. Details and per-test timings: `CONTRIBUTING.md`.
+
+Note the cost is **not** specific to pair aspects, and an earlier version of this file said it was.
+SUP-385 recorded "a single pair search over its 90-year window costs ~61,000 `swetest` spawns" and
+"the cost is driven by the WINDOW, not the pair count"; SUP-387 re-measured against an
+`include_pair_aspects: false` baseline and both are wrong. That 61,000 was the whole `find_events`
+call, of which the pair branch was ~8% — the rest was the ordinary moving-to-natal `contacts[]`
+search, which runs the same either way. What drives cost is the **sample count of the whole aspect
+search**: window length, body count, target count and aspect count all multiply into it, and the
+pair branch is a small minority of the total.
 
 Note also that **no CI job runs tests at all** in this repo (SUP-386 tracks fixing that). A green
 check on a PR here means the PR *title* linted. Whoever reviews is relying on your quoted local run.

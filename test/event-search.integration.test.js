@@ -4,6 +4,7 @@ import { SwissEphemerisServer } from '../index.js';
 import { resolveChartPoint, resolveAspectSettings, orbAllowedFor, MAJOR_ASPECTS } from '../lib/aspects.js';
 import { jdFromDate, seriesFor, positionAt, eclipsesFor } from '../lib/ephemeris-series.js';
 import {
+  memoizeProvider,
   scanTransitingBody,
   findContacts,
   findStations,
@@ -26,6 +27,51 @@ function providerFor(body) {
     positionAt: (atJd) => positionAt(body, atJd),
   };
 }
+
+// SUP-387. No swetest needed: the whole contract is "same JD, one call underneath", and a
+// counting stub states that more precisely than any timing measurement could.
+test('memoizeProvider: samples each JD once, passes distinct JDs through, and never rounds', () => {
+  let calls = 0;
+  const provider = memoizeProvider({
+    positionAt: (atJd) => { calls++; return { longitude: atJd * 2, speed: 1 }; },
+    seriesFor: () => [{ jd: 1, longitude: 2, speed: 1 }],
+  });
+
+  assert.equal(provider.positionAt(100).longitude, 200);
+  assert.equal(provider.positionAt(100).longitude, 200);
+  assert.equal(calls, 1, 'the second read of the same JD must not reach the provider');
+
+  provider.positionAt(101);
+  assert.equal(calls, 2);
+
+  // Adjacent JDs a rounding cache would collapse: 1e-9 days is ~0.1ms, far below any
+  // tolerance in this engine, and they still have to be two distinct samples - collapsing
+  // them would silently change an output value rather than just save a spawn.
+  provider.positionAt(100 + 1e-9);
+  assert.equal(calls, 3);
+
+  // seriesFor is passed through untouched.
+  assert.deepEqual(provider.seriesFor(0, 1, 1), [{ jd: 1, longitude: 2, speed: 1 }]);
+});
+
+test('memoizeProvider: prime fills the cache for a batched caller, and never overwrites a real sample', () => {
+  let calls = 0;
+  const provider = memoizeProvider({
+    positionAt: (atJd) => { calls++; return { longitude: atJd, speed: 0 }; },
+    seriesFor: () => [],
+  });
+
+  assert.equal(provider.isPrimed(50), false);
+  provider.prime(50, { longitude: 123, speed: 4 });
+  assert.equal(provider.isPrimed(50), true);
+  assert.deepEqual(provider.positionAt(50), { longitude: 123, speed: 4 });
+  assert.equal(calls, 0, 'a primed JD must not spawn anything');
+
+  provider.positionAt(60);
+  provider.prime(60, { longitude: 999, speed: 9 });
+  assert.equal(provider.positionAt(60).longitude, 60, 'prime must not clobber an already-sampled JD');
+  assert.equal(calls, 1);
+});
 
 // Datetimes are refined to well past the spec's +-1 minute accuracy floor, but a root
 // landing within a fraction of a second of a whole-second boundary can legitimately round

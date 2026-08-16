@@ -3,14 +3,15 @@
 ## Running the tests
 
 ```bash
-npm test          # the gate: ~6m15s, self-terminating
-npm run test:slow # everything, including the quarantine: ~2h, deliberately unbounded
+npm test          # the gate: ~1m15s, self-terminating
+npm run test:slow # everything, including the quarantine: ~26m, deliberately unbounded
 ```
 
-**Budget six to seven minutes for `npm test`.** Measured on an M-series Mac, 2026-08-15: `6m15s`
-wall clock, 398 tests, 382 pass, 16 skipped, exit 0. The slowest single test is ~82s (an eclipse
-window search) — nothing here is instant, because almost every integration test shells out to
-`swetest` for real ephemeris data rather than using a recorded fixture.
+**Budget a minute and a half for `npm test`.** Measured on an M-series Mac, 2026-08-16: `1m15s`
+wall clock, 402 tests, 386 pass, 16 skipped, exit 0. The slowest single test is ~12s (a lunation
+phase-set search) — nothing here is instant, because almost every integration test shells out to
+`swetest` for real ephemeris data rather than using a recorded fixture. It was `6m15s` with an ~82s
+slowest test before SUP-387 took the per-sample process spawns out of the event search.
 
 `npm test` runs through `scripts/run-tests.mjs` rather than calling `node --test` directly, because
 `node --test` alone cannot fail a hung run in this repo. Two independent bounds are needed
@@ -25,8 +26,12 @@ The second is not redundant. `--test-timeout` is a timer *inside* the test proce
 when the event loop turns — and every `swetest` call in this repo goes through `execSync`
 (`lib/ephemeris-series.js`), so a runaway search blocks the loop outright and that timer never runs.
 Verified: a test that busy-loops for 20s passes clean under `--test-timeout=2000`. Only killing the
-process from outside catches that shape. Both defaults are roughly 3× the measured figures above;
-set either to `0` to disable it.
+process from outside catches that shape. Set either to `0` to disable it.
+
+Both defaults were pitched at roughly 3× the figures measured when SUP-385 set them, and SUP-387
+then cut the suite by about 4× without moving them. That headroom is deliberate rather than
+overlooked: these bounds exist to catch a hang, and a hang is unbounded — pitching them close to a
+fast suite's real runtime buys nothing and starts failing runs on a contended or slower machine.
 
 (`node --test` does exit `1` when a test is *cancelled* rather than failed, so a per-test timeout
 surfaces as a red run with no extra handling. Beware measuring this through a pipe — `node --test … |
@@ -38,45 +43,59 @@ tail` reports `tail`'s exit status, not node's.)
 `RUN_SLOW_TESTS=1` (`npm run test:slow`). It is not broken and it does not hang — it is
 arithmetically enormous.
 
-**Budget about two hours.** That is an estimate summed from measured parts, not an observed total:
-the file has never once been seen to finish, with attempts abandoned at 42 minutes and at 1h56m
-(the latter a full-suite run, with this file still outstanding). Because nobody knows the real
-figure, `test:slow` sets **no** wall-clock bound (`TEST_WALL_CLOCK_MS=0`) — a cap pitched near an
-unknown runtime just converts "slow" into "fails after N hours and tells you nothing". `npm test`,
-the actual gate, stays bounded either way.
+**Budget about 26 minutes.** That is now an observed end-to-end figure rather than an estimate:
+before SUP-387 this file had never once been seen to finish, with attempts abandoned at 42 minutes
+and at 1h56m against a ≈1.5–2 h guess summed from parts. `test:slow` still sets **no** wall-clock
+bound (`TEST_WALL_CLOCK_MS=0`); `npm test`, the actual gate, stays bounded either way.
 
-Measured directly against this implementation on an M-series Mac, 2026-08-15, by calling
-`find_events` in-process with each test's own parameters:
+Per-test wall clocks from that run, as reported by `node --test` — the four longest, plus the two
+figures the old table above them can be compared against:
 
-| Configuration | Measured |
+| Test | Wall clock |
 |---|---|
-| 1 pair (Sun–Moon), 90yr progressed, majors — §9.1 | **5.2 min** (25 episodes) |
-| the same with `include_minor` — §9.1/§6.1 | **12.7 min** (62 episodes) |
-| default 10 pairs, 90yr progressed — §9.2 | **6.7 min** (109 episodes) |
-| 3 slow pairs (Sun/Venus/Mars), 90yr progressed — §9.3 | **5.1 min** (1 episode) |
-| default 10 pairs, 10yr progressed — §9.5 | **1.1 min** |
-| default 21 pairs, 1yr transit — §9.6 | **3.0 min** (52 episodes) |
+| §9.5 (Sun, Midheaven) excluded at either `angle_method` — two 90yr searches | 4.9 min |
+| §9.3 Sun–Mars / Venus–Mars, majors **and** `include_minor` over 90yr | 3.8 min |
+| §9.1/§6.1 eight_phase identity with `include_minor` — 90yr | 3.1 min |
+| §9.5 North Node never pairs — 90yr | 2.7 min |
+| §9.1 Sun–Moon majors — 90yr (was 5.2 min as a bare search) | 1.5 min |
+| §9.2 default 10 pairs — 90yr (was 6.7 min) | 1.2 min |
+| §9.6 transit rate, default 21 pairs, 1yr window (was 3.0 min) | 17.1 s |
 
-Two things follow, and both are counterintuitive enough to be worth stating before anyone estimates
-this file again:
+### What SUP-387 actually changed, and what drives the cost
 
-- **Cost tracks the window length, not the pair count.** Ten pairs over 90 years costs barely more
-  than one (6.7 vs 5.2 min), and three pairs that between them yield a *single* episode still cost
-  5.1 min. `swetest` is spawned per body per sample, so extra pairs over the same body set ride
-  along nearly free — what you pay for is sampling a 90-year window at all. Estimating this file by
-  counting pair-searches overstates it several-fold.
+Measured with a counting shim ahead of the real `swetest` on `PATH`, `DAY_CHART`, this branch
+against `origin/main` on the same machine in the same session. Spawn counts are exact; the wall
+clocks quoted are from separate unshimmed runs (the shim inflates wall time ~1.7×, not spawns):
+
+| `find_events` call | Spawns before | Spawns after |
+|---|---|---|
+| 1yr transit, aspects, pairs **off** | 11,510 | **1,490** (−87%) |
+| 1yr transit + Mars–Jupiter pair | 13,030 | **1,539** (−88%) |
+| 3yr progressed + Sun–Moon pair | 4,626 | **492** (−89%) |
+| 6mo transit, all five event types | 1,663 | **185** (−89%) |
+| 2yr progressed, angles + moving cusps | 1,108 | **263** (−76%) |
+
+The first row unshimmed: **83.4 s → 10.5 s**.
+
+- **The cost is not the pair count, and it is not really pairs at all.** An earlier version of this
+  section said "cost tracks the window length, not the pair count", citing ten pairs over 90 years
+  costing barely more than one (6.7 vs 5.2 min). The observation was right and the explanation was
+  wrong: extra pairs looked free because the *pair branch was never the expensive part*. At the
+  transit rate over a year, switching pairs off entirely saves 12%; the other 88% is the ordinary
+  moving-to-natal `contacts[]` search, which none of the tests in that file assert on. What you pay
+  for is the sample count of the **whole aspect search** — window length × moving bodies × natal
+  targets × aspect angles.
 - **`include_minor` costs roughly 2.5× a majors-only search** (2.47× at 90yr, 2.29× at 10yr): four
-  more aspect angles to detect and bisect.
+  more aspect angles to detect and refine.
+- **`bodies` is the untouched lever.** These tests all run the full default moving-body set and
+  then assert only on `pair_contacts`. Narrowing to `bodies: ['Moon']` cut a 3-year progressed pair
+  search 4,646 → 2,724 spawns pre-SUP-387 with pair results unchanged. Left alone deliberately:
+  §9.5 has a test asserting `pair_bodies` is independent of `bodies`, and losing that coverage to
+  buy minutes off a file that is quarantined anyway is a bad trade.
 
-Summing the file's 16 quarantined tests at these rates lands at **≈1.5–2 h uncontended**, which is
-consistent with a contended full-suite run still going at 1h56m. The underlying number to attack is
-process spawns: one Sun–Moon 90-year search costs **61,150 `swetest` invocations**, each one
-synchronous.
-
-So **a green `npm test` says nothing about `include_pair_aspects`.** If you touch the pair path in
-`index.js` or `lib/event-search.js`, run `npm run test:slow` and budget the two hours. Whichever of
-the two you ran, say which one when you report a result. SUP-387 tracks making this fast enough to
-un-quarantine; the skip and this section go away together.
+So **a green `npm test` still says nothing about `include_pair_aspects`.** If you touch the pair
+path — or the shared provider/root-finder seam under it in `lib/event-search.js` — run `npm run
+test:slow`. Whichever of the two you ran, say which one when you report a result.
 
 ## Commit convention
 
