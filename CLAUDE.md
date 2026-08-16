@@ -91,8 +91,9 @@ decision for the repo owner, not something to do unprompted.
 (SUP-385) because a single pair search over its 90-year window costs ~61,000 synchronous `swetest`
 spawns. A green `npm test` therefore says nothing about `include_pair_aspects`. Touching the pair
 path in `index.js` or `lib/event-search.js` means running `npm run test:slow` and budgeting about
-two hours for it — say which of the two you ran when you report a result. Details and per-test
-timings: `CONTRIBUTING.md`.
+an hour for it — say which of the two you ran when you report a result. (That budget was two hours
+before SUP-389 made each spawn ~2.5× cheaper; the spawn count itself is unchanged.) Details and
+per-test timings: `CONTRIBUTING.md`.
 
 Note also that **no CI job runs tests at all** in this repo (SUP-386 tracks fixing that). A green
 check on a PR here means the PR *title* linted. Whoever reviews is relying on your quoted local run.
