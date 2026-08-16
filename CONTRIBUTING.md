@@ -3,20 +3,20 @@
 ## Running the tests
 
 ```bash
-npm test          # the gate: ~35s, self-terminating
-npm run test:slow # everything, including the quarantine: ~11m, deliberately unbounded
+npm test          # the gate: ~20s, self-terminating
+npm run test:slow # everything, including the quarantine: ~8m, deliberately unbounded
 ```
 
-**Budget under a minute for `npm test`.** Measured on an M-series Mac, 2026-08-16: `36.5s` wall
-clock, 407 tests, 391 pass, 16 skipped, exit 0. The slowest single test is ~5.4s — nothing here is
-instant, because almost every integration test spawns `swetest` for real ephemeris data rather than
-using a recorded fixture.
+**Budget under a minute for `npm test`.** Measured on an M-series Mac, 2026-08-16: `20.3s` wall
+clock, 421 tests, 405 pass, 16 skipped, exit 0. Nothing here is instant, because almost every
+integration test spawns `swetest` for real ephemeris data rather than using a recorded fixture.
 
-Two changes cut that figure and they compound, so any older absolute number in this file's history
-is stale in both directions. **SUP-389** stopped routing every spawn through `/bin/sh`: back to
-back on one machine the suite went `7m39s` → `2m56s`. **SUP-387** then took most of the spawns out
-of the event search entirely. Read these as machine-specific — a `6m15s`/398-test figure in this
-file's history was the same pre-change suite on a quieter machine.
+Several changes have cut that figure and they compound, so any older absolute number in this file's
+history is stale in both directions. **SUP-389** stopped routing every spawn through `/bin/sh`:
+back to back on one machine the suite went `7m39s` → `2m56s`. **SUP-387**, **SUP-390** and
+**SUP-391** then took most of the spawns out of the event search entirely. Read these as
+machine-specific — a `6m15s`/398-test figure in this file's history was the same pre-change suite on
+a quieter machine.
 
 `npm test` runs through `scripts/run-tests.mjs` rather than calling `node --test` directly, because
 `node --test` alone cannot fail a hung run in this repo. Two independent bounds are needed
@@ -48,24 +48,25 @@ tail` reports `tail`'s exit status, not node's.)
 `RUN_SLOW_TESTS=1` (`npm run test:slow`). It is not broken and it does not hang — it is
 arithmetically enormous.
 
-**Budget about 11 minutes.** That is now an observed end-to-end figure rather than an estimate:
-before SUP-387 and SUP-389 this file had never once been seen to finish, with attempts abandoned at
-42 minutes and at 1h56m against a ≈1.5–2 h guess summed from parts. Measured 2026-08-16 on the tree
-carrying both changes, twice on an M-series Mac: `10m56s` and `10m44s` end to end, 407 tests, 407
-pass, 0 skipped, exit 0. `test:slow` still sets **no** wall-clock bound (`TEST_WALL_CLOCK_MS=0`);
-`npm test`, the actual gate, stays bounded either way.
+**Budget about 8 minutes.** That is an observed end-to-end figure rather than an estimate: before
+SUP-387 and SUP-389 this file had never once been seen to finish, with attempts abandoned at 42
+minutes and at 1h56m against a ≈1.5–2 h guess summed from parts. Measured 2026-08-16 on an M-series
+Mac: `7m41s` end to end, 421 tests, 421 pass, 0 skipped, exit 0. (It was `10m56s`/`10m44s` on the
+same machine before SUP-390 and SUP-391.) `test:slow` still sets **no** wall-clock bound
+(`TEST_WALL_CLOCK_MS=0`); `npm test`, the actual gate, stays bounded either way.
 
-Per-test wall clocks from that run, as reported by `node --test` — the longest few:
+Per-test wall clocks from that run, as reported by `node --test` — the longest few, with the
+pre-SUP-390/391 figure alongside:
 
-| Test | Wall clock |
-|---|---|
-| §9.5 (Sun, Midheaven) excluded at either `angle_method` — two 90yr searches | 113.6 s |
-| §9.3 Sun–Mars / Venus–Mars, majors **and** `include_minor` over 90yr | 97.4 s |
-| §9.1/§6.1 eight_phase identity with `include_minor` — 90yr | 76.7 s |
-| §9.5 North Node never pairs — 90yr | 70.9 s |
-| §9.5 retrograde is per body, not per relative rate — 90yr | 56.2 s |
-| Ascendant × Midheaven eligible but not default — 90yr | 46.8 s |
-| §9.1 Sun–Moon majors — 90yr | 33.3 s |
+| Test | Wall clock | was |
+|---|---|---|
+| §9.5 (Sun, Midheaven) excluded at either `angle_method` — two 90yr searches | 82.9 s | 113.6 s |
+| §9.3 Sun–Mars / Venus–Mars, majors **and** `include_minor` over 90yr | 72.9 s | 97.4 s |
+| §9.5 North Node never pairs — 90yr | 53.1 s | 70.9 s |
+| §9.1/§6.1 eight_phase identity with `include_minor` — 90yr | 48.0 s | 76.7 s |
+| §9.5 retrograde is per body, not per relative rate — 90yr | 42.6 s | 56.2 s |
+| Ascendant × Midheaven eligible but not default — 90yr | 29.9 s | 46.8 s |
+| §9.1 Sun–Moon majors — 90yr | 22.9 s | 33.3 s |
 
 For contrast, the same configurations measured in-process before either change (2026-08-15,
 pre-SUP-389; the `find_events` call alone, not the test around it): §9.1 Sun–Moon majors 5.2 min
@@ -186,22 +187,131 @@ arithmetic non-dyadic. `test/station-refinement.test.js` pins this with syntheti
 and a foil implementation of the rejected rule, so the guard cannot quietly go vacuous.
 
 **The quarantine stays, and here is the arithmetic rather than a preference.** SUP-387 set out to
-make this file cheap enough to un-quarantine. It got `test:slow` from never-finishing to 11 minutes,
-which is a budget a CI job could carry — but deleting the skip does not add 11 minutes to a CI job,
-it adds them to `npm test`, turning the gate everyone runs before every commit from 36 seconds into
-roughly 11 minutes. It would also leave the default `TEST_WALL_CLOCK_MS` (20 min) with 1.8×
-headroom instead of the current 33×, so an ordinary slow morning on a contended machine would start
-failing honest runs.
+make this file cheap enough to un-quarantine, and SUP-390 and SUP-391 kept chipping: `test:slow`
+went from never-finishing to 11 minutes to **7m41s**. That is a budget a CI job could carry — but
+deleting the skip does not add 8 minutes to a CI job, it adds them to `npm test`, turning the gate
+everyone runs before every commit from 20 seconds into roughly 8 minutes, a 23× regression on the
+one number every contributor pays on every commit. It would also leave the default
+`TEST_WALL_CLOCK_MS` (20 min) with 2.6× headroom instead of the current 59×, so an ordinary slow
+morning on a contended machine would start failing honest runs. Re-open this when `test:slow` is
+seconds, not minutes — which, per the floor established below, needs the spawn gone, not another
+round of sample-count work.
 
 The remaining cost is process spawn, and the only thing left that removes it is removing the spawn
-itself — a persistent `swetest` or libswe bindings — which is its own ticket, not a shorter window
-here. Where 11 minutes *does* pay off is CI: `test:slow` is now a plausible separate job, which it
-was not at 26 minutes and certainly not at two hours. That belongs to SUP-386, which tracks this
-repo having any test job at all.
+itself — which is its own ticket (SUP-391, below), not a shorter window here. Where 11 minutes
+*does* pay off is CI: `test:slow` is now a plausible separate job, which it was not at 26 minutes
+and certainly not at two hours. That belongs to SUP-386, which tracks this repo having any test job
+at all.
 
 So **a green `npm test` still says nothing about `include_pair_aspects`.** If you touch the pair
 path — or the shared provider/root-finder seam under it in `lib/event-search.js` — run `npm run
 test:slow`. Whichever of the two you ran, say which one when you report a result.
+
+### What SUP-391 changed, and where the floor is
+
+SUP-391 was filed to remove the process spawn itself — "a persistent `swetest` process or libswe
+bindings", measuring the persistent process first because it is reversible and re-verifies nothing.
+That half is not available, and the measurement saying so is worth keeping because it also bounds
+every future attempt at this.
+
+**A `swetest` spawn is ~94% process and ~6% Swiss Ephemeris.** M-series Mac, 2026-08-16, through
+the `execFileSync` path SUP-389 left, 200–400 reps each:
+
+| Spawned | Cost |
+|---|---|
+| `/usr/bin/true` | 1.15 ms |
+| `swetest` with an unrecognised flag — parses argv, prints usage, computes nothing | 1.61 ms |
+| `swetest -jX -ut -p0 -fJPls -head -n1` — one body, one instant | 1.79 ms |
+| the same for ten bodies (`-p0123456789`) | 1.90 ms |
+| the same for 63 rows (`-n63 -s0.01`) | 2.68 ms |
+| the same for 366 rows | 8.08 ms |
+| the same for 5,000 rows | 68.7 ms |
+
+The ephemeris work behind one position is the gap between rows two and three: **0.11 ms**.
+Everything under it is fork/exec/teardown, and two thirds of *that* is what any binary at all costs.
+`swetest` 2.10.03 has no persistent or REPL mode — `swetest -h` lists none, and it parses argv,
+computes, prints and exits — so there is nothing to keep alive; and even if there were, a `swetest`
+that became instantaneous would take a 1.79 ms sample to 1.61 ms. **The ceiling on a persistent
+`swetest` is about 10%, and it is unreachable.** Nothing in the Node spawn API moves it either:
+`execFileSync` against `spawnSync`, the full inherited environment (65 vars, 6.9 KB) against a
+minimal `{SE_EPHE_PATH}`, and piping stdout against buffering it, all landed between 1.72 and
+1.88 ms — noise.
+
+**What was left to remove.** Every spawn of the canonical call — 1 year, transit rate, `aspect`
+only, `include_pair_aspects: false`, `DAY_CHART` — attributed to its call site on the tree as
+SUP-390 left it:
+
+| Call site | Spawns | Share |
+|---|---|---|
+| `refineSegmentCrossing` (Newton) | 805 | 62.6% |
+| `findContacts` orb-interval midpoint probe | 412 | 32.0% |
+| `refineStationJd` (batched) | 48 | 3.7% |
+| coarse `seriesFor`, station position reads, the natal chart | 21 | 1.6% |
+
+Those 805 samples refine **369 roots — 2.18 per root**, against a floor of 2 (one to land near the
+root, one to prove the correction is inside `JD_TOLERANCE`). Nothing there. So SUP-391 took the only
+other line on the list: the midpoint probe is gone, replaced by two independent derivations from
+numbers `findContacts` already holds — parity across the crossing, and the sign of the crossing's own
+speed against which orb boundary it belongs to. Both must agree; where they don't, the probe still
+runs and still decides, so the self-verification the probe existed for is kept rather than traded
+away. Across the four shapes profiled they agreed on **every** interval (251/52/154/37, zero probes),
+which is why `test/orb-interval-resolution.test.js` forces the fallback in with synthetic providers
+that report zero speed, or a flipped speed sign, exactly on the boundary — otherwise the branch would
+ship untested.
+
+`DAY_CHART`, this branch against `origin/main` at `6705180`. Every scenario returned
+**byte-identical** JSON (all five diffed whole, not sampled). Spawn counts are exact, from a counting
+shim ahead of the real `swetest` on `PATH`; wall clocks are best-of-3 from a separate uninstrumented
+run, and include Node startup:
+
+| `find_events` call | Spawns | Wall |
+|---|---|---|
+| 1yr transit, aspects, pairs **off** | 1,286 → **888** (−31%) | 2,643 → **1,883** ms (1.40×) |
+| 1yr transit + Mars–Jupiter pair | 1,343 → **930** (−31%) | 2,832 → **1,958** ms (1.45×) |
+| 6mo transit, all five event types | 900 → **642** (−29%) | 2,104 → **1,496** ms (1.41×) |
+| 3yr progressed + Sun–Moon pair | 860 → **697** (−19%) | 1,879 → **1,492** ms (1.26×) |
+| 2yr progressed, angles + moving cusps | 1,305 → **1,195** (−8%) | 2,985 → **2,692** ms (1.11×) |
+
+The progressed-angles row moves least for the same reason it did under SUP-390: its cost is
+elsewhere (the two `calculateEphemeris` calls behind every progressed frame), not in orb intervals.
+
+**After this, the canonical call is 888 spawns and 90.7% of them are one thing:**
+
+| Call site | Spawns | Share |
+|---|---|---|
+| `refineSegmentCrossing` (Newton) | 805 | 90.7% |
+| `refineStationJd` (batched) | 48 | 5.4% |
+| `findContacts` — the window's two endpoints, once per body | 14 | 1.6% |
+| coarse `seriesFor`, station position reads, the natal chart | 21 | 2.4% |
+
+At 2.18 samples per root against a floor of 2, **there is no further sample-count work worth doing.**
+A perfect refiner would save 8%.
+
+**Why not spawn in parallel.** It is the one option that needs no new dependency and cannot change a
+single number — same binary, same argv, just concurrent. Throughput measured on the same machine,
+400 samples, one body one instant each:
+
+| Concurrency | 1 (sync) | 2 | 4 | 6 | 8 | 12 | 16 |
+|---|---|---|---|---|---|---|---|
+| ms/sample | 2.02 | 1.05 | 0.55 | 0.46 | 0.43 | 0.41 | 0.50 |
+
+So ~4.9× is available. What is *not* available is anything to run in parallel. The search offers
+almost no concurrent work at its natural seams: on the canonical call `enumerateCrossings` is
+entered 2,856 times for 369 roots total, and **2,514 of those calls (88%) find zero roots**; the
+largest finds 3. `findContacts` is entered 952 times for 1,203 intervals, and **812 (85%) have
+exactly one**. Newton is serial within a root by definition. Extracting an 8-wide batch therefore
+means inverting the control flow of the whole per-(body × natal target × aspect) loop into
+collect-requests / resolve-batch / resume — not a new seam method like `samplesFrom`, a rewrite of
+the engine's shape — for a constant factor that in-process bindings would then make redundant.
+Recorded as measured-and-declined, not overlooked.
+
+**What would actually remove the floor** is the other half of SUP-391's title: in-process libswe
+(native or WASM), which deletes the 1.7 ms outright and leaves the 0.11 ms. That is worth roughly
+16× on the sample cost — an order of magnitude more than anything above. It is also a decision
+rather than a patch: it adds a build step to a repo that has none, changes what produces the numbers
+(so every fixture `expected` and every published figure in `docs/` needs re-verification, not
+re-baselining), and has to keep working through `npx` and the Docker image. That is deliberately not
+folded into this change.
 
 ## Commit convention
 
