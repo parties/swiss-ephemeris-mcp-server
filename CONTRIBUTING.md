@@ -166,7 +166,7 @@ and 15.3% of a call is what batching it can be worth. The same attribution at th
 puts `refineStationJd` at 6.3% and something else entirely at the top: 41.6% of the spawns are the
 two `calculateEphemeris` calls behind every progressed frame (`progressedFrameAt`), one of which
 fetches all 17 bodies purely to read the obliquity off the `Ecl. Obl.` row. That is the biggest
-remaining lever at that rate and it is not this ticket.
+remaining lever at that rate and it is not this ticket — it became SUP-393, below.
 
 The cost model the `k = 6` batch width comes from, measured on an M-series Mac 2026-08-16 with the
 `execFileSync` path SUP-389 left: a spawn costs **~2.1 ms fixed** plus **~15 µs per additional row**,
@@ -312,6 +312,90 @@ rather than a patch: it adds a build step to a repo that has none, changes what 
 (so every fixture `expected` and every published figure in `docs/` needs re-verification, not
 re-baselining), and has to keep working through `npx` and the Docker image. That is deliberately not
 folded into this change.
+
+### What SUP-393 changed — the progressed frame
+
+Everything above is about the transit rate. At the progressed rate the top line was never sample
+count: it was the **frame**. A progressed Ascendant or moving house cusp is not a `-p` body but a
+`-house` chart computation at a fictitious longitude (`lib/progressions.js`'s
+`computeFictitiousLongitude`), and `index.js`'s `progressedFrameAt` built each one out of two
+`calculateEphemeris` calls. That method always runs a planets call *and* a houses call, so a frame
+was **four** spawns — and of those four, the first call's planets output was there to yield a single
+number (`obliquity`, off the `Ecl. Obl.` row, after computing all 17 bodies) and the second call's
+planets output was read by nobody at all.
+
+`-p` and `-house` compose in one invocation, so both halves of the handshake are now one narrow read
+each (`lib/house-frame.js`): `-po -house<lon>,<lat>,<sys> -fPZSBDl` prints the `Ecl. Obl.` row, the
+twelve cusps, the Ascendant and the ARMC together. Two spawns per frame, neither computing a planet.
+Per-spawn cost, same machine and method as the tables above, 300 reps each:
+
+| Invocation | Cost |
+|---|---|
+| `-p0123456789tADFGHIo -fPZSBDl-` — the planets call this replaces | 2.52 ms |
+| `-house… -fPZSBD` — the houses call this replaces | 2.10 ms |
+| `-po -house… -fPZSBDl` — `lib/house-frame.js` | 1.81 ms |
+| `-po` alone, no houses | 1.75 ms |
+
+**Omitting `-p` does not mean "no bodies".** That is the non-obvious part and the reason the houses
+call cost 2.10 ms rather than 1.81: with no `-p` at all, `swetest` computes and prints its 13 default
+planets alongside the cusps. The saving comes from asking for `-po` *explicitly*, not from asking for
+less. A frame therefore goes from 2×2.52 + 2×2.10 = **9.24 ms** to 2×1.81 = **3.63 ms**.
+
+`DAY_CHART` (plus `SOUTHERN_CHART` for the naibod/Whole Sign row), this branch against `origin/main`
+at `bc5ed95`. Every scenario returned **byte-identical** JSON — eleven of them, diffed whole, and
+deliberately including the three transit rows, both `calculate_secondary_progressions` shapes and a
+plain natal chart, because "the progressed path got faster" is only half the claim; the other half is
+that nothing else moved at all. Spawn counts are exact (an `execFileSync` counting shim); wall clocks
+are best-of-3 from a separate uninstrumented run alternating the two trees scenario by scenario:
+
+| Call | Spawns | Wall |
+|---|---|---|
+| 3yr progressed, all five event types | 1,442 → **1,152** (1.25×) | 3,004 → **2,094** ms (1.43×) |
+| 2yr progressed, `house_ingress`, moving cusps | 444 → **328** (1.35×) | 910 → **603** ms (1.51×) |
+| 3yr progressed (southern, naibod, Whole Sign, moving cusps) | 1,003 → **837** (1.20×) | 1,983 → **1,509** ms (1.31×) |
+| 3yr progressed, aspects + Asc/MC pairs | 771 → **677** (1.14×) | 1,474 → **1,257** ms (1.17×) |
+| 3yr transit, `station` only | 189 → **189** (1.00×) | 589 → 591 ms |
+| 1yr transit, all five event types | 1,098 → **1,098** (1.00×) | 2,319 → 2,360 ms |
+| 3yr transit, sign + house ingress | 314 → **314** (1.00×) | 838 → 833 ms |
+| `calculate_secondary_progressions` | 6 → **6** (1.00×) | unchanged |
+
+Wall gains lead spawn gains here, which is the opposite of SUP-390 and for the same underlying
+reason: the spawns removed are the *expensive* ones (a 17-body call and a 13-body one), while the two
+that remain are the cheapest shape `swetest` has.
+
+**Where the progressed rate's cost sits now.** Attribution of the 3-year all-types progressed call
+before this change (1,442 spawns):
+
+| Call site | Spawns | Share |
+|---|---|---|
+| body reads — Newton refinement, station refinement, coarse `seriesFor` | 746 | 51.7% |
+| `progressedFrameAt` — the two frame charts, 4 spawns × 145 uncached frames | 580 | 40.2% |
+| progressed Sun read inside `progressedFrameAt` (the solar arc for the frame's MC) | 112 | 7.8% |
+| natal chart + the birth-time-sensitivity chart | 4 | 0.3% |
+
+The 580 becomes 290 and nothing else moves. **Two things were deliberately left**, both because they
+cannot be removed without changing published timestamps or a lot more than this:
+
+- **The two-call handshake stays.** The fictitious longitude is a function of the ARMC *at* the
+  progressed instant, so the second read cannot be issued until the first has answered. Collapsing it
+  would mean computing obliquity and sidereal time in JS — reimplementing the part of Swiss Ephemeris
+  this server exists to defer to.
+- **The 7.8% Sun read stays.** It is one progressed-Sun position per uncached frame, taken at the
+  *exact* target JD while the frame itself is cached per whole ephemeris second. Moving it onto the
+  bucket's canonical instant would collapse those into one memo entry — and would move the fictitious
+  longitude, hence the reported Ascendant and cusp longitudes, in their last digits. Not worth a
+  published-number change for 7.8%.
+
+`test/house-frame.integration.test.js` pins the substitution contract directly: `houseFrameAt` must
+return **exactly** — not within a tolerance — what `calculateEphemeris` returns for obliquity, ARMC,
+Ascendant and all twelve cusps, across five fixtures × five house systems and at fictitious
+longitudes across the whole (-180, 180] range. That exactness is why the frame read keeps
+reconstructing longitude from the DMS columns instead of using the decimal `-l` field it now
+requests: `-l` prints `25.2146544` where the DMS columns give `25.214654389`. It also pins the claim
+that lets the narrow read skip `calculateEphemeris`'s missing-ephemeris-file guard — a house frame is
+byte-identical against an empty `SE_EPHE_PATH`, because obliquity and cusps come from the
+nutation/sidereal-time model rather than any `.se1` file. A *planet* on that same command would
+silently fall back to Moshier, which is exactly why the frame read requests none.
 
 ## Commit convention
 
