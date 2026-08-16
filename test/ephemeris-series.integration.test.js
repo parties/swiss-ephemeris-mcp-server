@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { jdFromDate, dateFromJd, positionAt, positionsAt, seriesFor, eclipsesFor } from '../lib/ephemeris-series.js';
+import { jdFromDate, dateFromJd, positionAt, positionsAt, samplesFrom, seriesFor, eclipsesFor } from '../lib/ephemeris-series.js';
 import { resolveEphePath, swetestAvailable } from './fixtures/ephe-path.js';
 
 const EPHE_PATH = resolveEphePath();
@@ -109,6 +109,49 @@ test('eclipsesFor: lunar eclipse annotation matches the verified 2026-03-03 tota
   assert.equal(eclipses[0].saros_series, 133);
   assert.equal(eclipses[0].saros_number, 27);
   assert.equal(dateFromJd(eclipses[0].jd).toISOString(), '2026-03-03T11:33:41.212Z');
+});
+
+// --- samplesFrom (SUP-390) -----------------------------------------------------------
+//
+// The batched read exists so lib/event-search.js's station refinement can narrow a bracket
+// several halvings per spawn. That is only sound if a grid row is the SAME reading a
+// standalone query at that instant returns, so these pin the equivalence directly - at a
+// coarse step and at 1e-8 day (about a millisecond), which is finer than the refinement ever
+// goes.
+test('samplesFrom: every grid row matches a standalone positionAt at the same instant', { skip: !HAS_SWETEST }, () => {
+  for (const [body, stepDays] of [['Mars', 1 / 64], ['Moon', 5e-7], ['Neptune', 1e-8]]) {
+    const start = 2461041.5;
+    const rows = samplesFrom(body, start, stepDays, 8);
+    assert.equal(rows.length, 8);
+    for (const [i, row] of rows.entries()) {
+      const direct = positionAt(body, start + i * stepDays);
+      // Speed is what the station search reads, and it is exact.
+      assert.equal(row.speed, direct.speed, `${body} row ${i}: speed differs`);
+      // Longitude can differ in the last printed digit at the finest steps - which is why
+      // the search reports a station's longitude from positionAt, never from a grid row.
+      assert.ok(
+        Math.abs(row.longitude - direct.longitude) <= 2e-7,
+        `${body} row ${i}: longitude ${row.longitude} vs ${direct.longitude}`,
+      );
+    }
+  }
+});
+
+// swetest prints the Julian day (`-fJ`) to five decimals - 0.86 seconds - which is coarser
+// than lib/event-search.js's 0.05s JD_TOLERANCE. A refinement grid that read its own JDs
+// back off the rows could not converge below the print resolution, so samplesFrom computes
+// them instead. This pins that it does.
+test('samplesFrom: reports JDs finer than swetest prints them', { skip: !HAS_SWETEST }, () => {
+  const start = 2461041.5;
+  const stepDays = 1e-7; // 8.6ms - two printed JD decimals below what -fJ shows
+  const rows = samplesFrom('Mars', start, stepDays, 4);
+  assert.deepEqual(rows.map((r) => r.jd), [0, 1, 2, 3].map((i) => start + i * stepDays));
+  assert.notEqual(rows[1].jd, rows[0].jd);
+  assert.ok(rows[1].jd - rows[0].jd < 1e-5, 'consecutive JDs must be distinguishable below the printed resolution');
+});
+
+test('samplesFrom: a zero-length request costs nothing and returns nothing', () => {
+  assert.deepEqual(samplesFrom('Mars', 2461041.5, 1, 0), []);
 });
 
 // Regression guard for the over-request-and-trim logic (spec §1.5: `-nN` returns exactly
