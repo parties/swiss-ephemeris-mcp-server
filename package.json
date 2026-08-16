@@ -54,6 +54,7 @@
   },
   "files": [
     "index.js",
+    "lib/",
     "README.md",
     "LICENSE",
     "vendor/"
