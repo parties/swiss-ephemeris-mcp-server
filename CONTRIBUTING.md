@@ -323,10 +323,15 @@ estimate in this paragraph as originally written was wrong in the conservative d
   every `expected` in `test/fixtures/charts.js` stands. Two exceptions. Eclipses are a port, not a
   drop-in: `-solecl`/`-lunecl` type strings are `swetest`'s display layer. And `find_events`
   **station timestamps move**, because `refineStationJd` bisects on the *printed* speed and
-  converges on the edge of its `0.0000000` plateau, which an unquantised `swe_calc_ut` does not
-  have — the four progressed stations in `docs/SUP-357-progressed-events-spec.md` §6.2, published
-  at ±1 s, shift by 13 s (Mercury), 44 s (Venus), 8.0 min (Jupiter) and 29.4 min (Pluto). Toward
-  the true root, so it is a correction; still a re-baseline someone has to do and explain.
+  converges on the edge of its `0.0000000` plateau. `swe_calc_ut` narrows that plateau by ~10× but
+  does **not** remove it: libswe finite-differences aberration and deflection to get apparent
+  speed (`swi_aberr_light`, `intv = PLAN_SPEED_INTV` = 8.64 s), leaving a ~1e-8 °/day noise floor
+  against `swetest`'s 1e-7 print quantum. Of the four progressed stations in
+  `docs/SUP-357-progressed-events-spec.md` §6.2, published at ±1 s, three are clean single roots
+  and shift by 13 s (Mercury), 44 s (Venus) and 8.0 min (Jupiter); **progressed Pluto flips sign 61
+  times across a 26.7-minute band** and has no root at all. Toward correct either way, so it is a
+  correction; still a re-baseline someone has to do and explain, and slow stations need a tolerance
+  rather than an equality.
 - **It does not add a build step; it removes two.** `swetest` is not vendored — README tells users
   to `git clone && make` it themselves, so a C toolchain is already a prerequisite of `npx` today.
   `sweph` ships N-API prebuilds for darwin-arm64/linux-x64/linux-arm64/win32-x64 and installed in

@@ -130,10 +130,13 @@ has now measured: **~160–410× on the sample cost and ~20× end to end**, not 
 It changes no **chart** figure — 119 longitudes, speeds, latitudes and declinations and 98 house
 cusps across all seven fixtures came back identical below `swetest`'s own print quantum — but it
 does move `find_events` **station timestamps**, because those refiners search on the printed
-quantum and an in-process call has none: measured, the four progressed stations
-`docs/SUP-357-progressed-events-spec.md` §6.2 publishes at ±1 s shift by 13 s, 44 s, 8.0 min and
-29.4 min. That is a correction, not a regression — the current values are a plateau edge, the new
-ones the true root — but it is a real re-baseline, and it is the expensive half. It also removes
+quantum and an in-process call's is ~10× finer rather than absent: libswe computes apparent speed
+by its own finite differencing, leaving a ~1e-8 °/day noise floor. Of the four progressed stations
+`docs/SUP-357-progressed-events-spec.md` §6.2 publishes at ±1 s, Mercury, Venus and Jupiter move to
+clean single roots 13 s, 44 s and 8.0 min later; **progressed Pluto has no root to move to** — its
+speed changes sign 61 times across a 26.7-minute band (`15:45:03Z .. 16:11:45Z`), so it can be
+re-baselined to a band but not to ±1 s. That is a correction, not a regression — the current values
+are a plateau edge — but it is a real re-baseline, and it is the expensive half. It also removes
 an install-time toolchain requirement rather than adding one, because `swetest` is not vendored and
 the README already tells users to `git clone && make` it. **The blocker is licensing, not engineering:** Swiss
 Ephemeris is AGPL-3.0 unless you hold a paid Astrodienst professional licence, so linking it in

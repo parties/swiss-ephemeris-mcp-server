@@ -53,36 +53,75 @@ magnitudes) return the same quantities, but the type strings the parser currentl
 (`"penumb. lunar eclipse"` and friends) are `swetest`'s own display layer, not library output.
 That path is a port with real re-verification behind it, not a drop-in.
 
-**Exception 2: `find_events` timestamps, which move by up to half an hour.** The chart tools read
+**Exception 2: `find_events` timestamps, which move by up to ~an hour.** The chart tools read
 a printed number and report it. The event search *searches on* printed numbers, and its refiners
 are built around the quantum — see the standing comment at `lib/event-search.js:103-148`. Speed
 prints to 7 decimals under `-fJPls`, so a station sits inside a PLATEAU that reads exactly
 `0.0000000`, and `refineStationJd` (bisecting on `Math.sign(speed)`) converges not on the root but
-on the *edge* of that plateau. In-process `swe_calc_ut` hands back a double: no plateau, no edge,
-and the search converges on the true zero instead.
+on the *edge* of that plateau.
 
-Measured in the same spike, against the four progressed stations
-`docs/SUP-357-progressed-events-spec.md` §6.2 publishes and asserts **to ±1 s** (`DAY_CHART`,
-`Y = 365.2422`):
+In-process `swe_calc_ut` hands back a double, which **narrows that plateau by about an order of
+magnitude but does not abolish it.** libswe's apparent speed is itself a finite difference: the
+aberration correction to velocity is recomputed as a difference of two aberrated positions over
+`intv = PLAN_SPEED_INTV` = 1e-4 d = 8.64 s (`swi_aberr_light`, `sweph.c:3699-3735`, ending in
+`xx[i+3] += dx1 / intv`), with `swi_deflect_light` doing the same for light deflection over
+`DEFL_SPEED_INTV` = 5e-7 d and the nutation term over `NUT_SPEED_INTV`. Differencing positions that
+carry double roundoff over intervals that short leaves a **speed noise floor**, measured here by
+fitting a local cubic to 401 samples across ±5e-4 d and taking the residual scatter:
 
-| Body | Published (§6.2) | True speed zero | Shift | Printed-zero plateau, in life time |
-|---|---|---|---|---|
-| Mercury | `2008-09-09T08:08:53Z` | `2008-09-09T08:09:06Z` | +13 s | 0.4 min |
-| Venus | `2027-11-21T04:40:35Z` | `2027-11-21T04:41:19Z` | +44 s | 1.3 min |
-| Pluto | `2038-10-09T16:41:04Z` | `2038-10-09T16:11:38Z` | **−29.4 min** | 119.9 min |
-| Jupiter | `2044-04-20T18:24:52Z` | `2044-04-20T18:32:52Z` | **+8.0 min** | 15.8 min |
+| Sampled at | RMS residual | Peak residual |
+|---|---|---|
+| Pluto, at its progressed station | 8.4e-9 °/day | 2.4e-8 °/day |
+| Pluto, at its 2027-05-08 transit station | 6.7e-9 °/day | 2.2e-8 °/day |
+| Pluto, 2027-01-01, nowhere near a station | 6.6e-9 °/day | 2.1e-8 °/day |
+| Jupiter, at its progressed station | 7.1e-9 °/day | 2.0e-8 °/day |
+| Mars, ordinary instant | 4.9e-9 °/day | 1.4e-8 °/day |
 
-Each shift is inside half its plateau, which is what the mechanism predicts: the plateau is
-`1e-7 °/day ÷ |d(speed)/dt|`, stretched 365.2422× by the day-for-a-year rescaling, so the slower
-the station the wider it is. Pluto's is two hours wide in life time for exactly the reason §6.2
-flags it as a genuine station rather than jitter — it turns at 0.00046 → −0.00014 °/day of target
-time. Confirming these published values *are* the edge and not something else: evaluate the
-7-decimal printed speed at each one and it reads `-0.0000001` or `-0.0000000`, i.e. the sign flip
-itself.
+The floor is ~1e-8 °/day and it is the same everywhere — body-independent and station-independent,
+i.e. a property of the arithmetic rather than of the geometry — which puts it **~10× below
+`swetest`'s 1e-7 print quantum, not at zero**. So `refineStationJd`'s `Math.sign(speed)` predicate
+stays non-monotone wherever `|d(speed)/dt|` is small enough that the true speed lingers inside that
+floor, and whatever a refiner returns there is an artifact of the refiner rather than a root.
 
-At the transit rate the same mechanism is worth seconds, not minutes. Pluto's `2027-05-08`
-station — the one `lib/event-search.js:127-131` samples at 0.25 s resolution — has its true zero
-at `12:54:17Z` against the `12:54:04-07Z` dither that comment records, on an 18-second plateau.
+Which stations that bites is decided by `|d(speed)/dt|`, and the split is clean. Measured against
+the four progressed stations `docs/SUP-357-progressed-events-spec.md` §6.2 publishes and asserts
+**to ±1 s** (`DAY_CHART`, `Y = 365.2422`), scanning `calc_ut`'s speed at 2.5e-7 d steps and
+counting `Math.sign` changes — one flip is a clean root, many means the scan is inside the floor:
+
+| Body | Published (§6.2) | Sign changes | In-process value | Shift | Printed-zero plateau, in life time |
+|---|---|---|---|---|---|
+| Mercury | `2008-09-09T08:08:53Z` | 1 | `2008-09-09T08:09:06Z` | +13 s | 0.4 min |
+| Venus | `2027-11-21T04:40:35Z` | 1 | `2027-11-21T04:41:19Z` | +44 s | 1.3 min |
+| Pluto | `2038-10-09T16:41:04Z` | **61** | band, `15:45:03Z .. 16:11:45Z` | **−56 to −29 min** | 88.7 min |
+| Jupiter | `2044-04-20T18:24:52Z` | 1 | `2044-04-20T18:32:52Z` | **+8.0 min** | 15.8 min |
+
+Mercury, Venus and Jupiter are clean single roots, reproducible to the second, and each shift is on
+the order of half its printed plateau — which is what converging to an edge instead of a centre
+predicts. The plateau is `1e-7 °/day ÷ |d(speed)/dt|`, stretched 365.2422× by the day-for-a-year
+rescaling, so the slower the station the wider it is. Confirming the published values *are* that
+edge and not something else: evaluate the 7-decimal printed speed at each and it reads
+`-0.0000001` or `-0.0000000`, i.e. the sign flip itself.
+
+Pluto is where the floor bites, for exactly the reason §6.2 flags it as a genuine station rather
+than jitter — it turns at 0.00046 → −0.00014 °/day of target time, and `|d(speed)/dt|` is
+5.93e-4 °/day² of ephemeris time (stable to 0.6% across central-difference baselines from 5e-4 to
+1 ephemeris day, which is where the 88.7-minute plateau above comes from; an independent fit landed
+on 88.1, and the 119.9 an earlier draft of this document carried was a worse slope estimate).
+Across the **26.7 minutes of life time** between `15:45:03Z` and `16:11:45Z` the returned speed
+changes sign 61 times: there is no root to converge on, only a band. Every root-finder lands
+somewhere inside it and every one of them is "the true zero" by construction — this spike's
+bisect-to-1e-8-then-Newton gives `16:11:38Z`, which is the band's **top edge**;
+bisect-then-false-position gives `15:52:54Z`; a least-squares fit of speed over ±0.005–0.05 d gives
+`16:01:56Z`. Where a given build lands inside the band is compiler-, libswe-version- and
+refiner-dependent. **A slow progressed station therefore cannot be asserted to ±1 s against
+in-process values, even in principle** — that is the operational consequence, and it belongs in
+SUP-395's scope rather than being found the hard way by whoever writes that test.
+
+At the transit rate the same mechanism is worth seconds, not minutes, and the same split holds.
+Pluto's `2027-05-08` station — the one `lib/event-search.js:127-131` samples at 0.25 s resolution —
+has an 18–19 s printed plateau, and in-process it narrows to an indeterminate band of
+`12:54:13Z .. 12:54:18Z`, ~4.6–4.9 s wide with 59–67 sign changes depending on the scan grid. A
+real ~3.6× on the `12:54:04-07Z` dither that comment records, but a band, not a point.
 
 Crossings shift too, by the same argument one step removed and **not measured here**:
 `refineSegmentCrossing` terminates on `residual / speed` against a 0.05 s `JD_TOLERANCE`, but
@@ -91,12 +130,14 @@ that quantum divided by the relative rate — ~9 ms for a 1 °/day transit pair,
 progressed one (every rate is ÷365), and unbounded for a crossing that happens near a station.
 Those are bounds, not deltas; the deltas need the run.
 
-Two things this is *not*. It is not a regression: the in-process value is the true root and the
-published one is a printing artifact, so a re-baseline moves the figures toward correct. And it is
-not an astrological error — SUP-357 §1.3 already records that second-level precision in progressed
-output is "arithmetic, not astrological", and nobody casts a chart for the instant of a progressed
-station. But it is four published figures with ±1 s assertions behind them, plus every event
-timestamp in `docs/tool_requests/`, needing re-derivation and a changelog note. **That** is the
+Two things this is *not*. It is not a regression: the published value is a printing artifact of a
+plateau the in-process call narrows by ~10×, so a re-baseline moves the figures toward correct —
+onto the true root for a fast body, and into a band an order of magnitude tighter for a slow one.
+And it is not an astrological error — SUP-357 §1.3 already records that second-level precision in
+progressed output is "arithmetic, not astrological", and nobody casts a chart for the instant of a
+progressed station, still less reads one to the minute. But it is four published figures with ±1 s
+assertions behind them, plus every event timestamp in `docs/tool_requests/`, needing re-derivation,
+a changelog note, and — for the slow ones — a tolerance rather than an equality. **That** is the
 expensive half, and it should be scoped into SUP-395 rather than discovered mid-implementation.
 
 ### 2. The speedup is ~160–410×, not 16×.
@@ -201,7 +242,8 @@ The engineering case is not close. It is faster than the estimate by an order of
 leaves every chart figure identical, it deletes a build-from-source step from both the README and
 the Dockerfile, and it retires the SUP-385 test machinery. Against that: a licence change on a
 public personal tool that is already unusable without AGPL software installed alongside it, and a
-one-time re-baseline of `find_events` station timestamps (§1, exception 2) — which corrects them.
+one-time re-baseline of `find_events` station timestamps (§1, exception 2) — which corrects them,
+and which for slow stations means replacing a ±1 s assertion with a tolerance rather than a number.
 
 The alternatives, so the trade is explicit:
 
@@ -233,12 +275,26 @@ are filed separately; neither is resolved by, or blocks, the decision above.
 The spike is five files against a scratch `npm install sweph`, not committed: a diff harness that
 runs the repo's exact `swetest` argv (`-p0123456789tADFGHIo -fPZSBDl- -g, -head` and
 `-house<lon>,<lat>,P -fPZSBD -g, -head`) against `calc_ut`/`houses` for each fixture and parses it
-back through the repo's own `lib/swetest-parse.js`, two timing harnesses, and a station harness
-that bisects `calc_ut`'s unquantised `data[3]` to the true speed zero and maps it back to life
-time through `targetJdForEphemeris`. Two traps worth recording, each of which cost a measurement
-pass. Bisecting a JD to a tolerance below its own ulp never terminates — a JD near 2.4e6 has an ulp
-of ~4.7e-10 d, so 1e-11 hangs; refine to 1e-8 d and take one Newton step on the speed derivative
-instead. And benchmarking with
+back through the repo's own `lib/swetest-parse.js`, two timing harnesses, a station harness that
+bisects `calc_ut`'s unquantised `data[3]` to a speed zero and maps it back to life time through
+`targetJdForEphemeris`, and — added after review — a **scan** harness that steps the same `data[3]`
+at 2.5e-7 d across ±5e-4 d and counts `Math.sign` changes.
+
+**Run the scan before believing any refiner.** It is the check the refiner cannot make on itself:
+one sign change means a clean root and the returned value is that root; dozens mean the scan is
+inside the ~1e-8 °/day floor and the returned value is an artifact of which path the refiner took.
+Three cross-checks on the Pluto figure (bisection agreeing with Newton, the printed speed reading
+`-0.0000000` at the published value, the shift landing near half the plateau) were all consistent
+with *any* point in a 27-minute band, and the scan is what distinguished them. The noise floor
+itself is measured by fitting a local cubic to 401 samples and taking the residual scatter, which
+also shows it is the same magnitude far from a station as at one.
+
+Three traps worth recording, each of which cost a measurement pass. Bisecting a JD to a tolerance
+below its own ulp never terminates — a JD near 2.4e6 has an ulp of ~4.7e-10 d, so 1e-11 hangs;
+refine to 1e-8 d and take one Newton step on the speed derivative instead. Estimating
+`|d(speed)/dt|` from too short a baseline reads the noise floor rather than the curve — for Pluto
+the slope is stable to 0.6% from 5e-4 to 1 ephemeris day, but a baseline at 1e-5 d is meaningless.
+And benchmarking with
 `execFileSync('swetest', …)` rather than an absolute path reports **35 ms/spawn** instead of
 2.24 ms — a bare binary name makes Node search `PATH` on every call. `lib/swetest-exec.js` already
 resolves the absolute path once, which is why the repo does not pay this; a benchmark that skips
