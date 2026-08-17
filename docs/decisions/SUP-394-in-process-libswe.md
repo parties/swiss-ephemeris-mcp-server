@@ -4,9 +4,10 @@
 
 **Measured and recommended; blocked on one call that is the repo owner's, not an engineer's.**
 
-The engineering question this ticket was filed to answer is settled, and it came out better than
-the ticket predicted on every axis it named. The blocker that remains is not packaging, not
-numeric drift, and not build tooling — it is that linking libswe into this package changes what
+The engineering question this ticket was filed to answer is settled. Speed and packaging came out
+better than the ticket predicted; re-verification came out split — free for the chart tools, a
+genuine re-baseline for `find_events` station timestamps (§1). The blocker that remains is neither
+of those and not build tooling either — it is that linking libswe into this package changes what
 the package distributes, and therefore what licence it can carry.
 
 ## What was measured
@@ -17,35 +18,86 @@ it. Candidate: [`sweph`](https://github.com/timotejroiko/sweph) 2.10.3-7 — N-A
 Swiss Ephemeris **2.10.03**, the same version as the vendored `swetest`. M-series Mac,
 2026-08-16, Node 24.
 
-### 1. The numbers do not move. At all.
+### 1. Static chart figures do not move. Event timestamps do.
 
-119 body longitudes (Sun through Pluto, true Node, mean Apogee, Chiron, Ceres, Pallas, Juno,
-Vesta) and 98 house cusps / Ascendants / MCs, across all seven fixtures in
-`test/fixtures/charts.js` — `DAY_CHART`, `NIGHT_CHART`, `PARTNER_CHART`, `SOUTHERN_CHART`,
-`WHOLE_SIGN_EDGE_CHART`, `NODE_DIVERGENCE_CHART`, `POLAR_CHART` — computed both ways and diffed:
+Every column of every chart-tool row, across all seven fixtures in `test/fixtures/charts.js` —
+`DAY_CHART`, `NIGHT_CHART`, `PARTNER_CHART`, `SOUTHERN_CHART`, `WHOLE_SIGN_EDGE_CHART`,
+`NODE_DIVERGENCE_CHART`, `POLAR_CHART` — computed both ways and diffed. Bodies are Sun through
+Pluto, true Node, mean Apogee, Chiron, Ceres, Pallas, Juno, Vesta:
 
-| Quantity | Compared | Max abs difference |
-|---|---|---|
-| Body longitude | 119 | 4.957e-8° |
-| True obliquity | 7 | 4.970e-8° |
-| House cusps, Ascendant, MC (Placidus) | 98 | 1.335e-8° |
+| Quantity | swetest column | Print quantum | Compared | Max abs difference |
+|---|---|---|---|---|
+| Body longitude | `l` (decimal) | 1e-7° | 119 | 4.957e-8° |
+| Longitude speed | `S` (D°MM'SS.ssss) | 2.778e-8° | 119 | 1.378e-8° |
+| Ecliptic latitude | `B` (D°MM'SS.ssss) | 2.778e-8° | 119 | 1.379e-8° |
+| Declination | `D` (D°MM'SS.ssss) | 2.778e-8° | 119 | 1.331e-8° |
+| True obliquity | `l` on the `Ecl. Obl.` row | 1e-7° | 7 | 4.970e-8° |
+| House cusps, Ascendant, MC (Placidus) | `Z` (D°MM'SS.ssss) | 2.778e-8° | 98 | 1.335e-8° |
 
-`swetest` prints 7 decimal places, so its own output quantum is 1e-7°. **Every difference above is
-below the precision `swetest` is capable of printing** — the worst case,
-`WHOLE_SIGN_EDGE_CHART` Vesta, prints `91.0911068` on both sides. This is not "close agreement";
-it is the same library at the same version reading the same data files, and the residual is the
-decimal rounding of the printed column.
+**Every difference is below the precision `swetest` is capable of printing** — the worst case on
+longitude, `WHOLE_SIGN_EDGE_CHART` Vesta, prints `91.0911068` on both sides, and the three DMS
+columns (which the first pass of this spike did not compare, and which feed a published layer of
+their own — `docs/SUP-345-declination-layer-spec.md`) come in at half their own coarser quantum.
+This is not "close agreement"; it is the same library at the same version reading the same data
+files, and the residual is the rounding of the printed column.
 
-This is the figure the ticket said the decision turns on, and the answer is **zero figures move**.
-The "expensive half" — re-verifying every `expected` and every published figure in `docs/` — is
-not expensive. For bodies and houses it is a diff that already passes.
+So for **the chart tools** — `calculate_ephemeris`, `calculate_planetary_positions`, houses,
+angles, the declination layer, and every `expected` in `test/fixtures/charts.js` — the answer is
+zero figures move, and re-verification is a diff that already passes. That is not the whole
+surface. Two exceptions, and the second one is the expensive half the ticket was pointing at:
 
-**The one exception is eclipses.** `lib/ephemeris-series.js` reaches eclipses through
+**Exception 1: eclipses.** `lib/ephemeris-series.js` reaches eclipses through
 `swetest -solecl` / `-lunecl` and `lib/swetest-parse.js` parses the resulting text blocks. The
 library equivalents (`sol_eclipse_when_glob`, `lun_eclipse_when`, and the `*_how` calls for
 magnitudes) return the same quantities, but the type strings the parser currently reads
 (`"penumb. lunar eclipse"` and friends) are `swetest`'s own display layer, not library output.
-That path is a port with real re-verification behind it, not a drop-in. It is the only one.
+That path is a port with real re-verification behind it, not a drop-in.
+
+**Exception 2: `find_events` timestamps, which move by up to half an hour.** The chart tools read
+a printed number and report it. The event search *searches on* printed numbers, and its refiners
+are built around the quantum — see the standing comment at `lib/event-search.js:103-148`. Speed
+prints to 7 decimals under `-fJPls`, so a station sits inside a PLATEAU that reads exactly
+`0.0000000`, and `refineStationJd` (bisecting on `Math.sign(speed)`) converges not on the root but
+on the *edge* of that plateau. In-process `swe_calc_ut` hands back a double: no plateau, no edge,
+and the search converges on the true zero instead.
+
+Measured in the same spike, against the four progressed stations
+`docs/SUP-357-progressed-events-spec.md` §6.2 publishes and asserts **to ±1 s** (`DAY_CHART`,
+`Y = 365.2422`):
+
+| Body | Published (§6.2) | True speed zero | Shift | Printed-zero plateau, in life time |
+|---|---|---|---|---|
+| Mercury | `2008-09-09T08:08:53Z` | `2008-09-09T08:09:06Z` | +13 s | 0.4 min |
+| Venus | `2027-11-21T04:40:35Z` | `2027-11-21T04:41:19Z` | +44 s | 1.3 min |
+| Pluto | `2038-10-09T16:41:04Z` | `2038-10-09T16:11:38Z` | **−29.4 min** | 119.9 min |
+| Jupiter | `2044-04-20T18:24:52Z` | `2044-04-20T18:32:52Z` | **+8.0 min** | 15.8 min |
+
+Each shift is inside half its plateau, which is what the mechanism predicts: the plateau is
+`1e-7 °/day ÷ |d(speed)/dt|`, stretched 365.2422× by the day-for-a-year rescaling, so the slower
+the station the wider it is. Pluto's is two hours wide in life time for exactly the reason §6.2
+flags it as a genuine station rather than jitter — it turns at 0.00046 → −0.00014 °/day of target
+time. Confirming these published values *are* the edge and not something else: evaluate the
+7-decimal printed speed at each one and it reads `-0.0000001` or `-0.0000000`, i.e. the sign flip
+itself.
+
+At the transit rate the same mechanism is worth seconds, not minutes. Pluto's `2027-05-08`
+station — the one `lib/event-search.js:127-131` samples at 0.25 s resolution — has its true zero
+at `12:54:17Z` against the `12:54:04-07Z` dither that comment records, on an 18-second plateau.
+
+Crossings shift too, by the same argument one step removed and **not measured here**:
+`refineSegmentCrossing` terminates on `residual / speed` against a 0.05 s `JD_TOLERANCE`, but
+`residual` is built from longitudes carrying the 1e-7° print quantum, so the honest resolution is
+that quantum divided by the relative rate — ~9 ms for a 1 °/day transit pair, seconds for a
+progressed one (every rate is ÷365), and unbounded for a crossing that happens near a station.
+Those are bounds, not deltas; the deltas need the run.
+
+Two things this is *not*. It is not a regression: the in-process value is the true root and the
+published one is a printing artifact, so a re-baseline moves the figures toward correct. And it is
+not an astrological error — SUP-357 §1.3 already records that second-level precision in progressed
+output is "arithmetic, not astrological", and nobody casts a chart for the instant of a progressed
+station. But it is four published figures with ±1 s assertions behind them, plus every event
+timestamp in `docs/tool_requests/`, needing re-derivation and a changelog note. **That** is the
+expensive half, and it should be scoped into SUP-395 rather than discovered mid-implementation.
 
 ### 2. The speedup is ~160–410×, not 16×.
 
@@ -146,17 +198,18 @@ by hand. The change is to what **this repo distributes**, not to what its users 
 is worth ~20× and the manual `swetest` prerequisite.
 
 The engineering case is not close. It is faster than the estimate by an order of magnitude, it
-changes no published number, it deletes a build-from-source step from both the README and the
-Dockerfile, and it retires the SUP-385 test machinery. The cost is a licence change on a public
-personal tool that is already unusable without AGPL software installed alongside it.
+leaves every chart figure identical, it deletes a build-from-source step from both the README and
+the Dockerfile, and it retires the SUP-385 test machinery. Against that: a licence change on a
+public personal tool that is already unusable without AGPL software installed alongside it, and a
+one-time re-baseline of `find_events` station timestamps (§1, exception 2) — which corrects them.
 
 The alternatives, so the trade is explicit:
 
-| | Perf | Install UX | Licence cost |
-|---|---|---|---|
-| **A. `sweph`, relicense AGPL-3.0** | ~20× | improves — prebuilts, no toolchain | server becomes AGPL; network users get a source offer under §13 |
-| **B. `sweph` + Astrodienst professional licence, use under LGPL-3.0** | ~20× | improves | money, plus LGPL dynamic-linking compliance; package stays permissive |
-| **C. Stay on `swetest`** | none — this repo's perf work is finished either way | unchanged: user builds Swiss Ephemeris by hand | none |
+| | Perf | Install UX | Re-verification | Licence cost |
+|---|---|---|---|---|
+| **A. `sweph`, relicense AGPL-3.0** | ~20× | improves — prebuilts, no toolchain | charts free; eclipses ported; event timestamps re-baselined | server becomes AGPL; network users get a source offer under §13 |
+| **B. `sweph` + Astrodienst professional licence, use under LGPL-3.0** | ~20× | improves | same as A | money, plus LGPL dynamic-linking compliance; package stays permissive |
+| **C. Stay on `swetest`** | none — this repo's perf work is finished either way | unchanged: user builds Swiss Ephemeris by hand | none | none |
 
 MIT → AGPL is available even though this repo is a fork of
 `ducrouxolivier/swiss-ephemeris-mcp-server`: MIT is GPL-compatible, so the inherited code can be
@@ -177,10 +230,15 @@ are filed separately; neither is resolved by, or blocks, the decision above.
 
 ## Reproducing
 
-The spike is three files against a scratch `npm install sweph`, not committed: a diff harness that
+The spike is five files against a scratch `npm install sweph`, not committed: a diff harness that
 runs the repo's exact `swetest` argv (`-p0123456789tADFGHIo -fPZSBDl- -g, -head` and
-`-house<lon>,<lat>,P -fPZSBD -g, -head`) against `calc_ut`/`houses` for each fixture, and two
-timing harnesses. One trap worth recording, because it cost a measurement pass: benchmarking with
+`-house<lon>,<lat>,P -fPZSBD -g, -head`) against `calc_ut`/`houses` for each fixture and parses it
+back through the repo's own `lib/swetest-parse.js`, two timing harnesses, and a station harness
+that bisects `calc_ut`'s unquantised `data[3]` to the true speed zero and maps it back to life
+time through `targetJdForEphemeris`. Two traps worth recording, each of which cost a measurement
+pass. Bisecting a JD to a tolerance below its own ulp never terminates — a JD near 2.4e6 has an ulp
+of ~4.7e-10 d, so 1e-11 hangs; refine to 1e-8 d and take one Newton step on the speed derivative
+instead. And benchmarking with
 `execFileSync('swetest', …)` rather than an absolute path reports **35 ms/spawn** instead of
 2.24 ms — a bare binary name makes Node search `PATH` on every call. `lib/swetest-exec.js` already
 resolves the absolute path once, which is why the repo does not pay this; a benchmark that skips

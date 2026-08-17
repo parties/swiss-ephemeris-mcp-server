@@ -317,10 +317,16 @@ estimate in this paragraph as originally written was wrong in the conservative d
   **0.0054 ms** in-process against 2.24 ms spawned; the worst case measured — a 16-day JD step that
   defeats segment locality entirely — is 0.0137 ms, still 163×. End to end the canonical call is
   ~20×, bounded by Node startup and JS rather than by the ephemeris.
-- **Re-verification is not the expensive half.** 119 body longitudes and 98 house cusps/angles
-  across all seven fixtures came back identical to `swetest` below its own 1e-7° print quantum —
-  same library version, same data files. Nothing to re-baseline. Eclipses are the one exception:
-  `-solecl`/`-lunecl` type strings are `swetest`'s display layer, so that path is a port.
+- **Re-verification is free for charts and real for events.** 119 body longitudes, speeds,
+  ecliptic latitudes and declinations and 98 house cusps/angles across all seven fixtures came back
+  identical to `swetest` below its own print quantum — same library version, same data files, so
+  every `expected` in `test/fixtures/charts.js` stands. Two exceptions. Eclipses are a port, not a
+  drop-in: `-solecl`/`-lunecl` type strings are `swetest`'s display layer. And `find_events`
+  **station timestamps move**, because `refineStationJd` bisects on the *printed* speed and
+  converges on the edge of its `0.0000000` plateau, which an unquantised `swe_calc_ut` does not
+  have — the four progressed stations in `docs/SUP-357-progressed-events-spec.md` §6.2, published
+  at ±1 s, shift by 13 s (Mercury), 44 s (Venus), 8.0 min (Jupiter) and 29.4 min (Pluto). Toward
+  the true root, so it is a correction; still a re-baseline someone has to do and explain.
 - **It does not add a build step; it removes two.** `swetest` is not vendored — README tells users
   to `git clone && make` it themselves, so a C toolchain is already a prerequisite of `npx` today.
   `sweph` ships N-API prebuilds for darwin-arm64/linux-x64/linux-arm64/win32-x64 and installed in

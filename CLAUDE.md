@@ -127,10 +127,15 @@ per root against a floor of 2. Further sample-count work is worth single-digit p
 remaining lever is deleting the process boundary — in-process libswe (**SUP-394**), which SUP-394
 has now measured: **~160–410× on the sample cost and ~20× end to end**, not the 16× estimated here
 (that figure divided by a *differenced* 0.11 ms that charges every sample for per-process setup).
-It changes no published number — 119 body longitudes and 98 house cusps across all seven fixtures
-came back identical below `swetest`'s own 1e-7° print quantum — and it removes an install-time
-toolchain requirement rather than adding one, because `swetest` is not vendored and the README
-already tells users to `git clone && make` it. **The blocker is licensing, not engineering:** Swiss
+It changes no **chart** figure — 119 longitudes, speeds, latitudes and declinations and 98 house
+cusps across all seven fixtures came back identical below `swetest`'s own print quantum — but it
+does move `find_events` **station timestamps**, because those refiners search on the printed
+quantum and an in-process call has none: measured, the four progressed stations
+`docs/SUP-357-progressed-events-spec.md` §6.2 publishes at ±1 s shift by 13 s, 44 s, 8.0 min and
+29.4 min. That is a correction, not a regression — the current values are a plateau edge, the new
+ones the true root — but it is a real re-baseline, and it is the expensive half. It also removes
+an install-time toolchain requirement rather than adding one, because `swetest` is not vendored and
+the README already tells users to `git clone && make` it. **The blocker is licensing, not engineering:** Swiss
 Ephemeris is AGPL-3.0 unless you hold a paid Astrodienst professional licence, so linking it in
 relicenses this package. That call is the repo owner's; do not start implementing until it is made.
 Full spike: `docs/decisions/SUP-394-in-process-libswe.md`. Other measurements: `CONTRIBUTING.md`.
