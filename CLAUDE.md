@@ -124,8 +124,16 @@ has no persistent mode to exploit and a free one would buy ~10%; nothing in the 
 (`execFileSync` vs `spawnSync`, env size, stdio shape) moves the figure at all; and after SUP-391
 **90.7%** of a 1-year transit aspect call's spawns are crossing refinement running at 2.18 samples
 per root against a floor of 2. Further sample-count work is worth single-digit percent. The only
-remaining lever is deleting the process boundary — in-process libswe (**SUP-394**) — which is ~16×
-and a dependency/build/re-verification decision, not a patch. Full measurements: `CONTRIBUTING.md`.
+remaining lever is deleting the process boundary — in-process libswe (**SUP-394**), which SUP-394
+has now measured: **~160–410× on the sample cost and ~20× end to end**, not the 16× estimated here
+(that figure divided by a *differenced* 0.11 ms that charges every sample for per-process setup).
+It changes no published number — 119 body longitudes and 98 house cusps across all seven fixtures
+came back identical below `swetest`'s own 1e-7° print quantum — and it removes an install-time
+toolchain requirement rather than adding one, because `swetest` is not vendored and the README
+already tells users to `git clone && make` it. **The blocker is licensing, not engineering:** Swiss
+Ephemeris is AGPL-3.0 unless you hold a paid Astrodienst professional licence, so linking it in
+relicenses this package. That call is the repo owner's; do not start implementing until it is made.
+Full spike: `docs/decisions/SUP-394-in-process-libswe.md`. Other measurements: `CONTRIBUTING.md`.
 
 That paragraph was about the transit rate, and the progressed rate had one structural exception left
 when it was written: the progressed **frame** was not sample-count work at all but four spawns of

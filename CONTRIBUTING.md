@@ -306,12 +306,32 @@ the engine's shape — for a constant factor that in-process bindings would then
 Recorded as measured-and-declined, not overlooked.
 
 **What would actually remove the floor** is the other half of SUP-391's title, now **SUP-394**: in-process libswe
-(native or WASM), which deletes the 1.7 ms outright and leaves the 0.11 ms. That is worth roughly
-16× on the sample cost — an order of magnitude more than anything above. It is also a decision
-rather than a patch: it adds a build step to a repo that has none, changes what produces the numbers
-(so every fixture `expected` and every published figure in `docs/` needs re-verification, not
-re-baselining), and has to keep working through `npx` and the Docker image. That is deliberately not
-folded into this change.
+(native or WASM), which deletes the 1.7 ms outright. SUP-394 has since measured it, and every
+estimate in this paragraph as originally written was wrong in the conservative direction — see
+`docs/decisions/SUP-394-in-process-libswe.md` for the full spike. Corrections:
+
+- **It is ~160–410× on the sample cost, not 16×.** The 16× was 1.79 ms ÷ the 0.11 ms above, and
+  that 0.11 ms is a *differenced* figure: it charges every sample for opening and mapping the
+  `.se1` file, `swe_set_ephe_path`, and output formatting, all of which a resident library pays
+  once per process rather than once per position. Measured directly, one body at one instant costs
+  **0.0054 ms** in-process against 2.24 ms spawned; the worst case measured — a 16-day JD step that
+  defeats segment locality entirely — is 0.0137 ms, still 163×. End to end the canonical call is
+  ~20×, bounded by Node startup and JS rather than by the ephemeris.
+- **Re-verification is not the expensive half.** 119 body longitudes and 98 house cusps/angles
+  across all seven fixtures came back identical to `swetest` below its own 1e-7° print quantum —
+  same library version, same data files. Nothing to re-baseline. Eclipses are the one exception:
+  `-solecl`/`-lunecl` type strings are `swetest`'s display layer, so that path is a port.
+- **It does not add a build step; it removes two.** `swetest` is not vendored — README tells users
+  to `git clone && make` it themselves, so a C toolchain is already a prerequisite of `npx` today.
+  `sweph` ships N-API prebuilds for darwin-arm64/linux-x64/linux-arm64/win32-x64 and installed in
+  3 seconds compiling nothing, and the Dockerfile's own clone-and-`make` layer would go away.
+
+**The actual blocker is the licence, which is why SUP-394 is a decision.** Swiss Ephemeris is
+AGPL-3.0 unless you hold a paid Astrodienst professional licence (which unlocks LGPL-3.0); this is
+true of every binding, so native-vs-WASM is not the question. Today this repo distributes no Swiss
+Ephemeris program code at all — it shells out to a binary the user built. Linking it in makes the
+published package a combined work, and AGPL §13 is aimed at exactly this shape of software. That
+call belongs to the repo owner, not to whoever picks up the ticket.
 
 ### What SUP-393 changed — the progressed frame
 
