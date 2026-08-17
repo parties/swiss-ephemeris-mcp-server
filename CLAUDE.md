@@ -124,8 +124,24 @@ has no persistent mode to exploit and a free one would buy ~10%; nothing in the 
 (`execFileSync` vs `spawnSync`, env size, stdio shape) moves the figure at all; and after SUP-391
 **90.7%** of a 1-year transit aspect call's spawns are crossing refinement running at 2.18 samples
 per root against a floor of 2. Further sample-count work is worth single-digit percent. The only
-remaining lever is deleting the process boundary — in-process libswe (**SUP-394**) — which is ~16×
-and a dependency/build/re-verification decision, not a patch. Full measurements: `CONTRIBUTING.md`.
+remaining lever is deleting the process boundary — in-process libswe (**SUP-394**), which SUP-394
+has now measured: **~160–410× on the sample cost and ~20× end to end**, not the 16× estimated here
+(that figure divided by a *differenced* 0.11 ms that charges every sample for per-process setup).
+It changes no **chart** figure — 119 longitudes, speeds, latitudes and declinations and 98 house
+cusps across all seven fixtures came back identical below `swetest`'s own print quantum — but it
+does move `find_events` **station timestamps**, because those refiners search on the printed
+quantum and an in-process call's is ~10× finer rather than absent: libswe computes apparent speed
+by its own finite differencing, leaving a ~1e-8 °/day noise floor. Of the four progressed stations
+`docs/SUP-357-progressed-events-spec.md` §6.2 publishes at ±1 s, Mercury, Venus and Jupiter move to
+clean single roots 13 s, 44 s and 8.0 min later; **progressed Pluto has no root to move to** — its
+speed changes sign 61 times across a 26.7-minute band (`15:45:03Z .. 16:11:45Z`), so it can be
+re-baselined to a band but not to ±1 s. That is a correction, not a regression — the current values
+are a plateau edge — but it is a real re-baseline, and it is the expensive half. It also removes
+an install-time toolchain requirement rather than adding one, because `swetest` is not vendored and
+the README already tells users to `git clone && make` it. **The blocker is licensing, not engineering:** Swiss
+Ephemeris is AGPL-3.0 unless you hold a paid Astrodienst professional licence, so linking it in
+relicenses this package. That call is the repo owner's; do not start implementing until it is made.
+Full spike: `docs/decisions/SUP-394-in-process-libswe.md`. Other measurements: `CONTRIBUTING.md`.
 
 That paragraph was about the transit rate, and the progressed rate had one structural exception left
 when it was written: the progressed **frame** was not sample-count work at all but four spawns of
